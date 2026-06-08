@@ -119,6 +119,22 @@
     .msg-meta { font-size: 11px; color: var(--text2); margin-top: 4px; padding: 0 4px; }
     .msg.user .msg-meta { text-align: right; }
 
+    /* Debug trace (Settings → Debug mode): developer view of prompts/tools */
+    .msg.debug { align-self: stretch; max-width: 100%; width: 100%; }
+    .debug-block {
+      background: #12150f; color: #cbd6c0; border: 1px solid var(--bg4);
+      border-left: 3px solid var(--gold); border-radius: 2px; overflow: hidden;
+    }
+    .debug-block summary {
+      cursor: pointer; padding: 6px 10px; color: var(--gold); font-weight: 600;
+      font-size: 11px; letter-spacing: 0.3px; user-select: none; font-family: var(--mono);
+    }
+    .debug-block pre {
+      margin: 0; padding: 8px 10px; border-top: 1px solid var(--bg4);
+      white-space: pre-wrap; word-break: break-word; max-height: 340px; overflow: auto;
+      font-family: var(--mono); font-size: 11px; line-height: 1.45; color: #cbd6c0;
+    }
+
     /* Markdown rendering in assistant bubbles */
     .msg-bubble h1,.msg-bubble h2,.msg-bubble h3 { font-family: var(--font-display); margin: 8px 0 4px; color: var(--accent); }
     .msg-bubble p { margin: 4px 0; }
@@ -472,7 +488,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b9 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b10 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -700,6 +716,10 @@
             <span class="toggle-label">Include usage stats</span>
             <label class="toggle"><input type="checkbox" id="toggle-usage" checked><span class="toggle-slider"></span></label>
           </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Debug mode (show prompt, raw output, tools)</span>
+            <label class="toggle"><input type="checkbox" id="toggle-debug"><span class="toggle-slider"></span></label>
+          </div>
         </div>
         <hr class="divider">
         <div class="section">
@@ -814,6 +834,7 @@ const State = {
     maxTokens: 2048,
     stream: true,
     includeUsage: true,
+    debugMode: false,
     geminiKey: "",
     geminiSearchModel: "gemini-2.5-flash",
     geminiSearchEnabled: false,
@@ -1020,6 +1041,7 @@ function bindSettings() {
   bind("system-prompt-input", "systemPrompt");
   bind("toggle-stream", "stream", "checked");
   bind("toggle-usage", "includeUsage", "checked");
+  bind("toggle-debug", "debugMode", "checked");
   bind("openai-base-url", "openaiBaseUrl");
   bind("openai-key", "openaiKey");
   bind("openai-model-id", "openaiModelId");
@@ -1574,18 +1596,25 @@ async function generateResponse(userText) {
 
     // Two-tier safety net: capable models answer from the grounded data above.
     // Tiny models (e.g. SmolLM) often ignore it and refuse ("I can't access the
-    // internet"). When that happens — or they answer with nothing — surface the
-    // data we already fetched so the user still gets it.
+    // internet"). When that happens — replace the refusal with the fetched data.
     if (isTopLevel && grounded) {
       const lastAnswer = [...State.messages].reverse()
         .find(m => m.role === "assistant" && !m._isSyntheticToolCall);
       if (looksLikeRefusal(lastAnswer?.content)) {
-        const note = State.language === "fr"
-          ? "Voici les informations que j'ai récupérées :"
-          : "Here's the information I retrieved:";
-        const msg = `${note}\n\n${grounded}`;
-        renderMessage("assistant", msg);
-        State.messages.push({ role: "assistant", content: msg, timestamp: Date.now() });
+        // Remove the last refusal from history
+        for (let i = State.messages.length - 1; i >= 0; i--) {
+          const m = State.messages[i];
+          if (m.role === "assistant" && !m._isSyntheticToolCall) {
+            State.messages.splice(i, 1);
+            break;
+          }
+        }
+        // Remove the last rendered assistant bubble from the DOM
+        const nodes = document.querySelectorAll("#messages .msg.assistant");
+        if (nodes.length) nodes[nodes.length - 1].remove();
+        // Render the fetched data as a fresh assistant message
+        renderMessage("assistant", grounded);
+        State.messages.push({ role: "assistant", content: grounded, timestamp: Date.now() });
         saveState();
         scrollToBottom();
         if (State.settings.ttsEnabled) speakText(grounded);
@@ -1657,6 +1686,7 @@ async function maybeAutoSearch(userText) {
   }
   if (!resultStr) return "";
   const capped = resultStr.slice(0, 1500);
+  renderDebug("auto-search → " + userText, resultStr);
 
   renderMessage("tool",
     `🔧 web_search(${JSON.stringify({ query: userText })}) →\n${resultStr.slice(0, 500)}`);
@@ -1671,8 +1701,8 @@ async function maybeAutoSearch(userText) {
   // Frame the result imperatively — small models otherwise default to "I can't
   // access the internet" even with the data right in front of them.
   const lead = State.language === "fr"
-    ? "[Données en temps réel récupérées du web pour toi. Tu Y AS accès. Réponds à la question en utilisant UNIQUEMENT ces données ; ne dis jamais que tu n'as pas accès à internet ou aux données en temps réel.]"
-    : "[Real-time data just retrieved from the web for you. You DO have access to it. Answer using ONLY this data; never say you lack internet or real-time access.]";
+    ? "Voici des résultats de recherche web en direct pour ma question. Base ta réponse sur ces résultats — ils sont exacts et actuels. Ne dis pas que tu n'as pas accès à internet ou aux données en temps réel."
+    : "Here are live web search results for my question. Base your answer on these results — they are accurate and current. Do not say you cannot access the internet or real-time data.";
   State.messages.push({
     role: "user",
     content: `${lead}\n\n[Tool result: web_search]\n${capped}`,
@@ -1726,7 +1756,7 @@ IMPORTANT: You have no built-in knowledge of real-time facts (weather, news, pri
 \`\`\`tool_call
 {"tool": "web_search", "args": {"query": "weather in Paris today"}}
 \`\`\`
-If a "[Tool result: web_search]" message is already present, use it to answer directly.
+IMPORTANT: When the conversation contains a "[Tool result: web_search]" message, it holds real, up-to-date information retrieved from the web for the user's question. Treat it as ground truth and base your answer entirely on it. NEVER claim you lack internet or real-time access when such a result is present.
 `;
 
   if (lang === "fr") {
@@ -1740,6 +1770,7 @@ ${tools}`;
 /** Generate one local LLM turn; returns content string */
 async function generateLocalTurn(typingId) {
   const messages = buildMessages();
+  renderDebug("prompt → " + (State.activeModelId || "local model") + " (" + messages.length + " msgs)", messages);
   const s = State.settings;
 
   let fullContent = "";
@@ -1796,6 +1827,7 @@ async function generateLocalTurn(typingId) {
   // Save to history
   State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
   saveState();
+  renderDebug("raw model output", fullContent || "(empty)");
 
   // TTS only if this is a final answer (no tool call)
   if (s.ttsEnabled && fullContent && !parseFirstToolCall(fullContent)) speakText(fullContent);
@@ -1810,6 +1842,7 @@ async function generateCloudTurn(typingId) {
   if (!cm) { removeTypingIndicator(typingId); addSystemMsg("No cloud model found."); return ""; }
 
   const messages = buildMessages();
+  renderDebug("prompt → cloud model (" + messages.length + " msgs)", messages);
   let content = "";
 
   try {
@@ -1864,6 +1897,7 @@ async function generateGeminiTurn(cm, messages, typingId) {
 
   const data = await resp.json();
   const content = data.candidates?.[0]?.content?.parts?.map(p => p.text).join("") || "(no response)";
+  renderDebug("raw model output", content);
 
   removeTypingIndicator(typingId);
   renderMessage("assistant", content);
@@ -1939,6 +1973,7 @@ async function generateOpenAITurn(cm, messages, typingId) {
     removeTypingIndicator(typingId);
     renderMessage("assistant", fullContent || "(empty)");
   }
+  renderDebug("raw model output", fullContent || "(empty)");
   State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
   saveState();
 
@@ -1990,6 +2025,8 @@ async function runAgenticLoop(initialTypingId) {
     const resultStr = typeof result === "string"
       ? result.slice(0, 500)
       : JSON.stringify(result).slice(0, 500);
+    renderDebug("tool call", toolCall);
+    renderDebug("tool result: " + tool, typeof result === "string" ? result : JSON.stringify(result, null, 2));
     renderMessage("tool",
       `🔧 ${tool}(${JSON.stringify(args || {})}) →\n${resultStr}`);
 
@@ -2661,6 +2698,27 @@ function addSystemMsg(text, type = "info") {
   // System messages may contain markdown
   bubble.innerHTML = renderMarkdown(text);
   wrapper.appendChild(bubble);
+  container.appendChild(wrapper);
+  scrollToBottom();
+}
+
+// Debug trace — only rendered when Settings → Debug mode is on. Ephemeral:
+// not saved to history and never spoken, so it never pollutes conversations.
+function renderDebug(title, body) {
+  if (!State.settings.debugMode) return;
+  const container = document.getElementById("messages");
+  const wrapper = document.createElement("div");
+  wrapper.className = "msg debug";
+  const details = document.createElement("details");
+  details.className = "debug-block";
+  details.open = true;
+  const summary = document.createElement("summary");
+  summary.textContent = "🐞 " + title;
+  const pre = document.createElement("pre");
+  pre.textContent = typeof body === "string" ? body : JSON.stringify(body, null, 2);
+  details.appendChild(summary);
+  details.appendChild(pre);
+  wrapper.appendChild(details);
   container.appendChild(wrapper);
   scrollToBottom();
 }
