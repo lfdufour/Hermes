@@ -487,7 +487,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b19 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b20 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -1801,8 +1801,11 @@ function buildMessages() {
   }
 
   // Qwen3 thinking control: append the soft switch to the latest user turn.
+  // State._forceNoThink is a one-shot override used by the agentic loop to retry
+  // a "thinks-and-stops" dud turn with reasoning disabled.
   if (activeModelSupportsThinking()) {
-    const sw = State.settings.thinkingEnabled ? " /think" : " /no_think";
+    const wantThink = State.settings.thinkingEnabled && !State._forceNoThink;
+    const sw = wantThink ? " /think" : " /no_think";
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role === "user") { msgs[i] = { ...msgs[i], content: msgs[i].content + sw }; break; }
     }
@@ -1909,7 +1912,7 @@ async function generateLocalTurn(typingId) {
   }
 
   // Save to history
-  State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
+  State.messages.push({ role: "assistant", content: stripThink(fullContent), timestamp: Date.now() });
   saveState();
   renderDebug("raw model output", fullContent || "(empty)");
   const _think = (fullContent.match(/<think>([\s\S]*?)<\/think>/i) || [])[1];
@@ -1990,7 +1993,7 @@ async function generateGeminiTurn(cm, messages, typingId) {
   removeTypingIndicator(typingId);
   const shownG = displayText(content) || thinkFallback(content);
   if (shownG) renderMessage("assistant", shownG);
-  State.messages.push({ role: "assistant", content, timestamp: Date.now() });
+  State.messages.push({ role: "assistant", content: stripThink(content), timestamp: Date.now() });
   saveState();
 
   if (State.settings.ttsEnabled && !parseFirstToolCall(content)) speakText(displayText(content));
@@ -2068,7 +2071,7 @@ async function generateOpenAITurn(cm, messages, typingId) {
   renderDebug("raw model output", fullContent || "(empty)");
   const _thinkOf = (fullContent.match(/<think>([\s\S]*?)<\/think>/i) || [])[1];
   if (_thinkOf && _thinkOf.trim()) renderDebug("💭 thinking", _thinkOf.trim());
-  State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
+  State.messages.push({ role: "assistant", content: stripThink(fullContent), timestamp: Date.now() });
   saveState();
 
   if (State.settings.ttsEnabled && !parseFirstToolCall(fullContent)) speakText(displayText(fullContent));
@@ -2085,6 +2088,7 @@ async function runAgenticLoop(initialTypingId) {
   let iterCount = 0;
   let typingId = initialTypingId;
   State._stopRequested = false;
+  State._forceNoThink = false;
 
   while (iterCount < MAX_TOOL_ITERATIONS) {
     if (State._stopRequested) {
@@ -2101,7 +2105,22 @@ async function runAgenticLoop(initialTypingId) {
 
     // Parse first tool call in the response
     const toolCall = parseFirstToolCall(content);
-    if (!toolCall) break;   // no tool call → final answer
+    if (!toolCall) {
+      // Pure-thinking dud: Qwen3-0.6B sometimes emits its <think> preamble then
+      // stops (EOS) without ever producing a tool call or a visible answer.
+      // Retry the turn ONCE with thinking forced off — /no_think reliably yields
+      // clean output. removeLastAssistantMessage drops the dud bubble + history.
+      if (!displayText(content) && activeModelSupportsThinking()
+          && State.settings.thinkingEnabled && !State._forceNoThink) {
+        removeLastAssistantMessage();
+        State._forceNoThink = true;
+        typingId = null;   // generateOneTurn will create a fresh indicator
+        continue;
+      }
+      State._forceNoThink = false;   // genuine final answer
+      break;
+    }
+    State._forceNoThink = false;     // tool call found → clear override
 
     // Strip <think> hallucinations from the stored assistant turn so the next
     // generation sees only the tool_call block without simulated fake results.
@@ -2184,6 +2203,19 @@ function thinkFallback(content) {
   if (parseFirstToolCall(content)) return "";   // tool-call turn — no visible text by design
   const m = /<think>([\s\S]*?)(?:<\/think>|$)/i.exec(content);
   return m ? m[1].trim() : "";
+}
+
+// Qwen3's chat template never re-feeds prior <think> reasoning back to the model.
+// We mirror that: strip think blocks (closed and unclosed) before STORING an
+// assistant turn, so stale half-thoughts don't pollute context or teach the model
+// (in-context) to "think then stop". tool_call blocks and the real answer are kept.
+// Raw output is still shown in the debug panel (extracted before this strip).
+function stripThink(s) {
+  if (!s) return s;
+  return s
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/i, "")
+    .trim();
 }
 
 /** Generate exactly one LLM turn; returns the content string */
