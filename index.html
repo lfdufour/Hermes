@@ -484,7 +484,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b14 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b15 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -784,7 +784,11 @@ const LS_KEY = "hermes_v1";
 /** Curated model list — filtered at runtime against prebuiltAppConfig */
 const CURATED_MODEL_IDS = [
   "SmolLM2-360M-Instruct-q4f16_1-MLC",       // ~200MB  — fastest, tiny
+  "SmolLM2-135M-Instruct-q0f16-MLC",         // ~270MB  — tiniest, most crash-resistant
   "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",       // ~400MB  — multilingual, tiny
+  "Qwen3-0.6B-q4f16_1-MLC",                  // ~450MB  — newest Qwen, tiny
+  "Llama-3.2-1B-Instruct-q4f16_1-MLC",       // ~800MB  — Meta, ~1B
+  "gemma-3-1b-it-q4f16_1-MLC",               // ~1GB    — Google Gemma 3, ~1B
   "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",       // ~1GB    — multilingual, small
   "Qwen3-1.7B-q4f16_1-MLC",                  // ~1.2GB  — multilingual, recent
   "Llama-3.2-3B-Instruct-q4f16_1-MLC",       // ~2GB    — balanced
@@ -797,7 +801,11 @@ const CURATED_MODEL_IDS = [
 /** Human-readable size hints */
 const MODEL_SIZE_HINTS = {
   "SmolLM2-360M-Instruct-q4f16_1-MLC": "~200 MB",
+  "SmolLM2-135M-Instruct-q0f16-MLC": "~270 MB",
   "Qwen2.5-0.5B-Instruct-q4f16_1-MLC": "~400 MB",
+  "Qwen3-0.6B-q4f16_1-MLC": "~450 MB",
+  "Llama-3.2-1B-Instruct-q4f16_1-MLC": "~800 MB",
+  "gemma-3-1b-it-q4f16_1-MLC": "~1 GB",
   "Qwen2.5-1.5B-Instruct-q4f16_1-MLC": "~1 GB",
   "Qwen3-1.7B-q4f16_1-MLC": "~1.2 GB",
   "Llama-3.2-3B-Instruct-q4f16_1-MLC": "~2 GB",
