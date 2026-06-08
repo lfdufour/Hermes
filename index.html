@@ -184,8 +184,8 @@
     #btn-send.btn-send-winged { padding: 10px 18px; }
     .sandal-icon { width: 30px; height: 24px; display: block; overflow: visible; }
     .sandal-icon .sole { fill: currentColor; }
-    .sandal-icon .strap { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-    .sandal-icon .wing { fill: currentColor; transform-box: view-box; transform-origin: 11px 18px; transition: transform 0.15s ease; }
+    .sandal-icon .strap { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .sandal-icon .wing { fill: currentColor; transform-box: view-box; transform-origin: 10px 19px; transition: transform 0.15s ease; }
     @keyframes wingFlap { 0%{transform:rotate(7deg)} 50%{transform:rotate(-21deg)} 100%{transform:rotate(7deg)} }
     /* gentle invite on hover */
     #btn-send.btn-send-winged:hover:not(:disabled):not(.thinking) .wing { animation: wingFlap 0.9s ease-in-out infinite; }
@@ -421,8 +421,8 @@
               <g class="wing">
                 <path d="M11 18.5 C 7 17.5 3 14.5 1.2 10.2 C 3.6 11.6 5 11.4 5.9 10.8 C 3.4 9.6 2 7 1.8 4.2 C 4.3 6.2 5.9 6.5 6.9 6.2 C 5.2 4.5 4.7 2.3 5 0.6 C 7.6 3.4 9.7 7 11 10.8 C 11.9 13.4 11.9 16.2 11 18.5 Z"/>
               </g>
-              <path class="sole" d="M9 19 C 14 17.8 24 17.8 30 18.6 C 31.8 18.9 33.2 19.4 33 20.2 C 32.6 21.8 27 23.4 19 23.4 C 13 23.4 9.6 21.6 9 19 Z"/>
-              <path class="strap" d="M15 18.6 L 19 12.5 L 23 18.4 M 27 18.3 L 26 15.6"/>
+              <path class="sole" d="M8 20.3 C 10 18.9 14 18.5 19 18.5 C 25 18.5 30 18.9 32.6 19.9 C 33.7 20.3 33.7 21.4 32.6 22 C 30 23.5 24 24.1 18.5 24.1 C 13 24.1 9.4 23.3 8 22 C 7.1 21.3 7.2 20.8 8 20.3 Z"/>
+              <path class="strap" d="M12.5 19 C 14 13.4 24 13.4 25.5 19"/>
             </svg>
             <span class="sr-only">Send</span>
           </button>
