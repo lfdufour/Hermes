@@ -3,29 +3,36 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#ebe1ce" />
+  <meta name="color-scheme" content="light" />
   <title>Hermes — Local-First AI Assistant</title>
   <style>
     /* ===== RESET & BASE ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg0: #0d0f14;
-      --bg1: #13161e;
-      --bg2: #1c2030;
-      --bg3: #252a3a;
-      --bg4: #2e3450;
-      --border: #353c55;
-      --text0: #e8eaf6;
-      --text1: #b0b8d8;
-      --text2: #7880a0;
-      --accent: #6c8aff;
-      --accent2: #a78bfa;
-      --green: #4ade80;
-      --yellow: #fbbf24;
-      --red: #f87171;
-      --orange: #fb923c;
+      /* Palette: Greek antiquity — aged papyrus & marble, Aegean blue,
+         red-figure terracotta, with bronze/gold for the messenger's mark. */
+      --bg0: #e4d8c2;   /* aged papyrus — main canvas */
+      --bg1: #ebe1ce;   /* topbar, side panel, input bar */
+      --bg2: #f5eddc;   /* cards, bubbles, inputs — ivory / marble */
+      --bg3: #ded2b8;   /* code blocks, secondary buttons — tan */
+      --bg4: #d0c1a1;   /* hover / toggle track — deeper tan */
+      --border: #c9b996;/* soft tan border */
+      --text0: #2b2519; /* warm ink — primary text */
+      --text1: #5a5040; /* umber — secondary text */
+      --text2: #8a7e66; /* taupe — muted text */
+      --accent: #1f5c8b;/* Aegean blue — primary accent */
+      --accent2: #b14a33;/* terracotta — secondary (red-figure) accent */
+      --gold: #a6791e;  /* bronze/gold — the messenger's mark */
+      --green: #5e7a3c; /* laurel / olive — success */
+      --yellow: #bd8c1f;/* gold ochre — warning */
+      --red: #98231a;   /* deep brick — danger */
+      --orange: #c0702b;/* bronze — accents */
+      --on-accent: #faf5ea; /* parchment-white for text on accent fills */
       --panel-w: 340px;
       --topbar-h: 48px;
       --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      --font-display: 'Optima', 'Palatino Linotype', Palatino, 'Iowan Old Style', Georgia, serif;
       --mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
     }
     html, body { height: 100%; overflow: hidden; background: var(--bg0); color: var(--text0); font-family: var(--font); font-size: 14px; }
@@ -36,16 +43,18 @@
     ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
 
     /* ===== LAYOUT ===== */
-    #app { display: flex; flex-direction: column; height: 100vh; }
+    #app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 
     /* TOP STATUS BAR */
     #topbar {
       height: var(--topbar-h); min-height: var(--topbar-h);
       background: var(--bg1); border-bottom: 1px solid var(--border);
+      box-shadow: 0 1px 0 rgba(166,121,30,0.22);
       display: flex; align-items: center; gap: 8px; padding: 0 12px;
       flex-wrap: wrap; z-index: 100;
     }
-    #topbar .logo { font-weight: 700; font-size: 16px; color: var(--accent); margin-right: 8px; letter-spacing: 1px; }
+    #topbar .logo { font-family: var(--font-display); font-weight: 700; font-size: 18px; color: var(--gold); margin-right: 10px; letter-spacing: 2px; }
+    #topbar .logo .caduceus { color: var(--accent2); font-weight: 400; }
     .pill {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 3px 9px; border-radius: 12px; font-size: 12px;
@@ -91,7 +100,7 @@
       word-break: break-word;
     }
     .msg.user .msg-bubble {
-      background: var(--accent); color: #fff; border-bottom-right-radius: 3px;
+      background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 3px;
     }
     .msg.assistant .msg-bubble {
       background: var(--bg2); border: 1px solid var(--border); border-bottom-left-radius: 3px;
@@ -108,7 +117,7 @@
     .msg.user .msg-meta { text-align: right; }
 
     /* Markdown rendering in assistant bubbles */
-    .msg-bubble h1,.msg-bubble h2,.msg-bubble h3 { margin: 8px 0 4px; color: var(--accent); }
+    .msg-bubble h1,.msg-bubble h2,.msg-bubble h3 { font-family: var(--font-display); margin: 8px 0 4px; color: var(--accent); }
     .msg-bubble p { margin: 4px 0; }
     .msg-bubble ul,.msg-bubble ol { margin: 4px 0 4px 20px; }
     .msg-bubble li { margin: 2px 0; }
@@ -158,17 +167,33 @@
       transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px;
     }
     .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover:not(:disabled) { background: #5576e8; }
+    .btn-primary { background: var(--accent); color: var(--on-accent); }
+    .btn-primary:hover:not(:disabled) { background: #17486e; }
     .btn-secondary { background: var(--bg3); color: var(--text0); border: 1px solid var(--border); }
     .btn-secondary:hover:not(:disabled) { background: var(--bg4); }
-    .btn-danger { background: var(--red); color: #fff; }
-    .btn-danger:hover:not(:disabled) { background: #e85555; }
+    .btn-danger { background: var(--red); color: var(--on-accent); }
+    .btn-danger:hover:not(:disabled) { background: #7a1a12; }
     .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
     .btn-icon { padding: 8px; border-radius: 8px; background: var(--bg3); border: 1px solid var(--border); color: var(--text0); cursor: pointer; font-size: 16px; transition: all 0.15s; }
     .btn-icon:hover { background: var(--bg4); }
-    .btn-icon.active { background: var(--red); color: #fff; border-color: var(--red); animation: pulse 1.5s infinite; }
-    @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(248,113,113,0.4)} 50%{box-shadow:0 0 0 6px rgba(248,113,113,0)} }
+    .btn-icon.active { background: var(--red); color: var(--on-accent); border-color: var(--red); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(152,35,26,0.4)} 50%{box-shadow:0 0 0 6px rgba(152,35,26,0)} }
+
+    /* Winged sandal send button — Hermes the messenger takes flight */
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    #btn-send.btn-send-winged { padding: 10px 18px; }
+    .sandal-icon { width: 30px; height: 24px; display: block; overflow: visible; }
+    .sandal-icon .sole { fill: currentColor; }
+    .sandal-icon .strap { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    .sandal-icon .wing { fill: currentColor; transform-box: view-box; transform-origin: 11px 18px; transition: transform 0.15s ease; }
+    @keyframes wingFlap { 0%{transform:rotate(7deg)} 50%{transform:rotate(-21deg)} 100%{transform:rotate(7deg)} }
+    /* gentle invite on hover */
+    #btn-send.btn-send-winged:hover:not(:disabled):not(.thinking) .wing { animation: wingFlap 0.9s ease-in-out infinite; }
+    /* energetic flap while generating; turns terracotta — tap to recall (stop) */
+    #btn-send.btn-send-winged.thinking { background: var(--accent2); }
+    #btn-send.btn-send-winged.thinking:hover { background: #8f3a28; }
+    #btn-send.btn-send-winged.thinking .wing { animation: wingFlap 0.34s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) { .sandal-icon .wing { animation: none !important; } }
 
     #status-line {
       display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text2);
@@ -230,7 +255,7 @@
     }
     .toggle-slider::before {
       content: ''; position: absolute; width: 14px; height: 14px;
-      left: 3px; top: 3px; background: #fff; border-radius: 50%;
+      left: 3px; top: 3px; background: var(--on-accent); border-radius: 50%;
       transition: transform 0.2s;
     }
     input:checked + .toggle-slider { background: var(--accent); }
@@ -248,9 +273,9 @@
       font-size: 10px; padding: 2px 7px; border-radius: 10px;
       background: var(--bg4); color: var(--text2); text-transform: uppercase;
     }
-    .model-card-badge.loaded { background: rgba(74,222,128,0.15); color: var(--green); }
-    .model-card-badge.active { background: rgba(108,138,255,0.2); color: var(--accent); }
-    .model-card-badge.loading { background: rgba(251,191,36,0.15); color: var(--yellow); }
+    .model-card-badge.loaded { background: rgba(94,122,60,0.18); color: var(--green); }
+    .model-card-badge.active { background: rgba(31,92,139,0.16); color: var(--accent); }
+    .model-card-badge.loading { background: rgba(189,140,31,0.18); color: var(--yellow); }
     .model-card-size { font-size: 11px; color: var(--text2); margin-bottom: 6px; }
     .model-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .model-progress {
@@ -270,14 +295,14 @@
     }
     .ledger-entry-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
     .ledger-method { font-size: 10px; padding: 2px 5px; border-radius: 3px; font-weight: 700; }
-    .ledger-method.POST { background: rgba(108,138,255,0.2); color: var(--accent); }
-    .ledger-method.GET { background: rgba(74,222,128,0.2); color: var(--green); }
+    .ledger-method.POST { background: rgba(31,92,139,0.16); color: var(--accent); }
+    .ledger-method.GET { background: rgba(94,122,60,0.18); color: var(--green); }
     .ledger-url { color: var(--text1); word-break: break-all; flex: 1; }
     .ledger-time { color: var(--text2); font-size: 10px; flex-shrink: 0; }
     .ledger-detail { color: var(--text2); font-size: 11px; }
     .ledger-status { font-size: 10px; padding: 1px 5px; border-radius: 3px; }
-    .ledger-status.ok { background: rgba(74,222,128,0.15); color: var(--green); }
-    .ledger-status.err { background: rgba(248,113,113,0.15); color: var(--red); }
+    .ledger-status.ok { background: rgba(94,122,60,0.18); color: var(--green); }
+    .ledger-status.err { background: rgba(152,35,26,0.15); color: var(--red); }
 
     /* Actions log */
     .action-entry {
@@ -297,10 +322,10 @@
       padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 10px;
       display: flex; align-items: flex-start; gap: 8px;
     }
-    .banner.warn { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: var(--yellow); }
-    .banner.error { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--red); }
-    .banner.info { background: rgba(108,138,255,0.1); border: 1px solid rgba(108,138,255,0.3); color: var(--accent); }
-    .banner.success { background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.3); color: var(--green); }
+    .banner.warn { background: rgba(189,140,31,0.12); border: 1px solid rgba(189,140,31,0.35); color: var(--yellow); }
+    .banner.error { background: rgba(152,35,26,0.10); border: 1px solid rgba(152,35,26,0.30); color: var(--red); }
+    .banner.info { background: rgba(31,92,139,0.10); border: 1px solid rgba(31,92,139,0.30); color: var(--accent); }
+    .banner.success { background: rgba(94,122,60,0.12); border: 1px solid rgba(94,122,60,0.32); color: var(--green); }
 
     /* Memory items */
     .memory-item {
@@ -317,7 +342,7 @@
 
     /* Progress modal */
     #global-progress {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      position: fixed; inset: 0; background: rgba(43,37,25,0.55);
       display: none; align-items: center; justify-content: center; z-index: 999;
     }
     #global-progress.visible { display: flex; }
@@ -357,7 +382,7 @@
 
   <!-- TOP STATUS BAR -->
   <div id="topbar">
-    <span class="logo">⚡ HERMES</span>
+    <span class="logo"><span class="caduceus">☤</span> HERMES</span>
     <span class="pill" id="pill-webgpu">
       <span class="dot dot-gray" id="dot-webgpu"></span>
       <span id="label-webgpu">WebGPU …</span>
@@ -391,7 +416,16 @@
           <button id="btn-voice" class="btn-icon" title="Push to talk (hold)" style="display:none">🎤</button>
           <textarea id="chat-input" rows="1" placeholder="Message Hermes… (Enter to send, Shift+Enter for newline)"></textarea>
           <button id="btn-stop" class="btn btn-danger" style="display:none" title="Stop generation">■ Stop</button>
-          <button id="btn-send" class="btn btn-primary" disabled>Send</button>
+          <button id="btn-send" class="btn btn-primary btn-send-winged" title="Send" aria-label="Send" disabled>
+            <svg class="sandal-icon" viewBox="0 0 36 28" aria-hidden="true" focusable="false">
+              <g class="wing">
+                <path d="M11 18.5 C 7 17.5 3 14.5 1.2 10.2 C 3.6 11.6 5 11.4 5.9 10.8 C 3.4 9.6 2 7 1.8 4.2 C 4.3 6.2 5.9 6.5 6.9 6.2 C 5.2 4.5 4.7 2.3 5 0.6 C 7.6 3.4 9.7 7 11 10.8 C 11.9 13.4 11.9 16.2 11 18.5 Z"/>
+              </g>
+              <path class="sole" d="M9 19 C 14 17.8 24 17.8 30 18.6 C 31.8 18.9 33.2 19.4 33 20.2 C 32.6 21.8 27 23.4 19 23.4 C 13 23.4 9.6 21.6 9 19 Z"/>
+              <path class="strap" d="M15 18.6 L 19 12.5 L 23 18.4 M 27 18.3 L 26 15.6"/>
+            </svg>
+            <span class="sr-only">Send</span>
+          </button>
         </div>
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
@@ -1254,17 +1288,13 @@ function initChat() {
     }
   });
 
-  sendBtn.addEventListener("click", sendMessage);
-
-  document.getElementById("btn-stop").addEventListener("click", () => {
-    State._stopRequested = true;
-    if (State.engine) {
-      // WebLLM doesn't have an explicit abort but setting _stopRequested lets
-      // runAgenticLoop exit after the current token stream finishes
-      try { State.engine.interruptGenerate?.(); } catch(e) {}
-    }
-    logAction("info", "stop", "Generation stopped by user");
+  // One winged button: send when idle, recall Hermes (stop) when in flight
+  sendBtn.addEventListener("click", () => {
+    if (State._generating) requestStop();
+    else sendMessage();
   });
+
+  document.getElementById("btn-stop").addEventListener("click", requestStop);
 
   // Restore conversation
   for (const msg of State.messages) {
@@ -1277,15 +1307,38 @@ function initChat() {
   }
 }
 
+function requestStop() {
+  State._stopRequested = true;
+  if (State.engine) {
+    // WebLLM has no hard abort, but setting _stopRequested lets the agentic
+    // loop exit after the current token stream finishes.
+    try { State.engine.interruptGenerate?.(); } catch(e) {}
+  }
+  logAction("info", "stop", State.language === "fr"
+    ? "Génération arrêtée par l'utilisateur" : "Generation stopped by user");
+}
+
 function updateSendButton() {
   const input = document.getElementById("chat-input");
   const hasModel = !!State.activeModelId || !!State.settings.activeCloudModelId;
   const hasText = input.value.trim().length > 0;
   const busy = !!State._generating;
 
-  document.getElementById("btn-send").disabled = !hasModel || !hasText || busy;
-  document.getElementById("btn-send").style.display = busy ? "none" : "inline-flex";
-  document.getElementById("btn-stop").style.display = busy ? "inline-flex" : "none";
+  const sendBtn = document.getElementById("btn-send");
+  sendBtn.style.display = "inline-flex";
+  document.getElementById("btn-stop").style.display = "none";
+  if (busy) {
+    // Hermes is in flight — wings flap; tapping recalls him (stops generation)
+    sendBtn.disabled = false;
+    sendBtn.classList.add("thinking");
+    sendBtn.title = State.language === "fr" ? "Arrêter" : "Stop";
+    sendBtn.setAttribute("aria-label", sendBtn.title);
+  } else {
+    sendBtn.disabled = !hasModel || !hasText;
+    sendBtn.classList.remove("thinking");
+    sendBtn.title = State.language === "fr" ? "Envoyer" : "Send";
+    sendBtn.setAttribute("aria-label", sendBtn.title);
+  }
 
   const statusEl = document.getElementById("status-text");
   if (!hasModel) {
@@ -1414,6 +1467,14 @@ async function generateResponse(userText) {
     updateSendButton();
   }
 
+  // Proactive grounding: small local models seldom emit tool calls on their
+  // own, so for clearly time-sensitive questions (weather, news, prices…)
+  // we fetch fresh web results up front and feed them into context.
+  if (isTopLevel) {
+    try { await maybeAutoSearch(userText); }
+    catch(e) { console.error("auto-search:", e); }
+  }
+
   const typingId = addTypingIndicator();
 
   try {
@@ -1428,6 +1489,55 @@ async function generateResponse(userText) {
       updateSendButton();
     }
   }
+}
+
+// Heuristic: does this query clearly need live/external information that a
+// local model can't know? (weather, news, prices, "today", scores…) EN + FR.
+function needsFreshInfo(text) {
+  const t = " " + text.toLowerCase() + " ";
+  const strong = /\b(weather|forecast|temperature|news|headlines?|stock|share price|exchange rate)\b|m[ée]t[ée]o|pr[ée]visions?|quel temps|actualit[ée]s?|\bnouvelles\b|cours de l|\bbourse\b|taux de change/;
+  if (strong.test(t)) return true;
+  const temporal = /\b(today|tonight|right now|currently|this week|this morning|latest|current)\b|aujourd'?hui|maintenant|ce soir|cette semaine|en ce moment|derni[èe]res?|r[ée]cent/;
+  const question = /\b(what|where|when|who|which|how much|how many|is|are|will|do)\b|\b(quel|quelle|o[uù]|combien|qui|quand|est-ce)\b|\?/;
+  return temporal.test(t) && question.test(t);
+}
+
+// Fetch fresh results before the model answers, when warranted and possible.
+async function maybeAutoSearch(userText) {
+  if (!needsFreshInfo(userText)) return;
+  const s = State.settings;
+  const hasProvider = (s.geminiSearchEnabled && s.geminiKey) ||
+                      (s.pseEnabled && s.pseKey && s.pseCx);
+  if (!hasProvider) {
+    addSystemMsg(State.language === "fr"
+      ? "Cette question nécessite des informations en temps réel. Activez la recherche Gemini (onglet Recherche) et ajoutez une clé API pour que Hermes puisse chercher en ligne."
+      : "This question needs live information. Enable Gemini Search in the Search tab and add an API key so Hermes can look it up online.");
+    return;
+  }
+
+  let result;
+  try { result = await toolWebSearch(userText); }
+  catch(e) { logAction("error", "auto_search", e.message); return; }
+
+  let resultStr;
+  if (result && typeof result === "object") {
+    const srcs = (result.sources || []).slice(0, 5)
+      .map(x => `- ${x.title || x.uri}: ${x.uri}`).join("\n");
+    resultStr = ((result.text || "") + (srcs ? `\n\nSources:\n${srcs}` : "")).trim();
+  } else {
+    resultStr = String(result || "").trim();
+  }
+  if (!resultStr) return;
+
+  renderMessage("tool",
+    `🔧 web_search(${JSON.stringify({ query: userText })}) →\n${resultStr.slice(0, 500)}`);
+  State.messages.push({
+    role: "user",
+    content: `[Tool result: web_search]\n${resultStr.slice(0, 1500)}`,
+    timestamp: Date.now(),
+    _isTool: true,
+  });
+  saveState();
 }
 
 function buildMessages() {
@@ -1468,6 +1578,12 @@ Available tools:
 - current_datetime() — Get current date and time
 
 After a tool call, you will receive a tool result and should continue to answer the user.
+
+IMPORTANT: You have no built-in knowledge of real-time facts (weather, news, prices, sports scores, anything "today" or after your training). For ANY such question you MUST call web_search first instead of guessing or saying you cannot help. Example:
+\`\`\`tool_call
+{"tool": "web_search", "args": {"query": "weather in Paris today"}}
+\`\`\`
+If a "[Tool result: web_search]" message is already present, use it to answer directly.
 `;
 
   if (lang === "fr") {
@@ -2631,7 +2747,7 @@ window.addEventListener("error", e => {
 // Boot
 init().catch(err => {
   console.error("Fatal init error:", err);
-  document.body.innerHTML = `<div style="color:#f87171;padding:40px;font-family:monospace">
+  document.body.innerHTML = `<div style="color:#98231a;padding:40px;font-family:monospace">
     <h2>Hermes failed to initialize</h2>
     <p>${escHtml(String(err))}</p>
     <p>Check browser console for details. Requires a modern browser (Chrome 113+).</p>
