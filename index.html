@@ -1,0 +1,2642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hermes — Local-First AI Assistant</title>
+  <style>
+    /* ===== RESET & BASE ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg0: #0d0f14;
+      --bg1: #13161e;
+      --bg2: #1c2030;
+      --bg3: #252a3a;
+      --bg4: #2e3450;
+      --border: #353c55;
+      --text0: #e8eaf6;
+      --text1: #b0b8d8;
+      --text2: #7880a0;
+      --accent: #6c8aff;
+      --accent2: #a78bfa;
+      --green: #4ade80;
+      --yellow: #fbbf24;
+      --red: #f87171;
+      --orange: #fb923c;
+      --panel-w: 340px;
+      --topbar-h: 48px;
+      --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      --mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+    html, body { height: 100%; overflow: hidden; background: var(--bg0); color: var(--text0); font-family: var(--font); font-size: 14px; }
+
+    /* ===== SCROLLBAR ===== */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg1); }
+    ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
+
+    /* ===== LAYOUT ===== */
+    #app { display: flex; flex-direction: column; height: 100vh; }
+
+    /* TOP STATUS BAR */
+    #topbar {
+      height: var(--topbar-h); min-height: var(--topbar-h);
+      background: var(--bg1); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px; padding: 0 12px;
+      flex-wrap: wrap; z-index: 100;
+    }
+    #topbar .logo { font-weight: 700; font-size: 16px; color: var(--accent); margin-right: 8px; letter-spacing: 1px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: 12px; font-size: 12px;
+      border: 1px solid var(--border); background: var(--bg2);
+    }
+    .pill .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dot-green { background: var(--green); box-shadow: 0 0 5px var(--green); }
+    .dot-yellow { background: var(--yellow); }
+    .dot-red { background: var(--red); }
+    .dot-gray { background: var(--text2); }
+    #topbar .spacer { flex: 1; }
+    #btn-panel-toggle {
+      background: var(--bg3); border: 1px solid var(--border); color: var(--text0);
+      padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
+      transition: background 0.15s;
+    }
+    #btn-panel-toggle:hover { background: var(--bg4); }
+
+    /* MAIN BODY */
+    #main-body { display: flex; flex: 1; overflow: hidden; }
+
+    /* CHAT AREA */
+    #chat-area {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden;
+      background: var(--bg0);
+    }
+
+    #messages {
+      flex: 1; overflow-y: auto; padding: 16px 24px; display: flex;
+      flex-direction: column; gap: 12px;
+    }
+
+    .msg {
+      max-width: 820px; width: 100%;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+    .msg.user { align-self: flex-end; }
+    .msg.assistant, .msg.system, .msg.tool { align-self: flex-start; }
+
+    .msg-bubble {
+      padding: 10px 14px; border-radius: 12px; line-height: 1.55;
+      word-break: break-word;
+    }
+    .msg.user .msg-bubble {
+      background: var(--accent); color: #fff; border-bottom-right-radius: 3px;
+    }
+    .msg.assistant .msg-bubble {
+      background: var(--bg2); border: 1px solid var(--border); border-bottom-left-radius: 3px;
+    }
+    .msg.system .msg-bubble {
+      background: var(--bg1); border: 1px solid var(--border);
+      color: var(--text2); font-size: 12px; font-style: italic;
+    }
+    .msg.tool .msg-bubble {
+      background: var(--bg1); border: 1px solid var(--bg4);
+      color: var(--text1); font-size: 12px; font-family: var(--mono);
+    }
+    .msg-meta { font-size: 11px; color: var(--text2); margin-top: 4px; padding: 0 4px; }
+    .msg.user .msg-meta { text-align: right; }
+
+    /* Markdown rendering in assistant bubbles */
+    .msg-bubble h1,.msg-bubble h2,.msg-bubble h3 { margin: 8px 0 4px; color: var(--accent); }
+    .msg-bubble p { margin: 4px 0; }
+    .msg-bubble ul,.msg-bubble ol { margin: 4px 0 4px 20px; }
+    .msg-bubble li { margin: 2px 0; }
+    .msg-bubble code { background: var(--bg3); padding: 1px 5px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
+    .msg-bubble pre { background: var(--bg3); padding: 10px; border-radius: 8px; overflow-x: auto; margin: 6px 0; }
+    .msg-bubble pre code { background: none; padding: 0; }
+    .msg-bubble a { color: var(--accent); }
+    .msg-bubble blockquote { border-left: 3px solid var(--border); padding-left: 10px; color: var(--text1); }
+    .msg-bubble table { border-collapse: collapse; width: 100%; margin: 6px 0; }
+    .msg-bubble th, .msg-bubble td { border: 1px solid var(--border); padding: 4px 8px; }
+    .msg-bubble th { background: var(--bg3); }
+
+    .typing-indicator { display: flex; gap: 4px; align-items: center; padding: 4px 0; }
+    .typing-indicator span {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+      animation: bounce 1.2s infinite;
+    }
+    .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
+
+    .citation-block {
+      margin-top: 8px; padding: 8px 10px; background: var(--bg3);
+      border-radius: 8px; border-left: 3px solid var(--accent2); font-size: 12px;
+    }
+    .citation-block a { color: var(--accent2); word-break: break-all; }
+
+    /* INPUT BAR */
+    #input-bar {
+      background: var(--bg1); border-top: 1px solid var(--border);
+      padding: 12px 24px; display: flex; flex-direction: column; gap: 8px;
+    }
+    #input-row { display: flex; gap: 8px; align-items: flex-end; }
+    #chat-input {
+      flex: 1; background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 14px; color: var(--text0);
+      font-family: var(--font); font-size: 14px; resize: none;
+      min-height: 44px; max-height: 160px; outline: none;
+      transition: border-color 0.15s;
+    }
+    #chat-input:focus { border-color: var(--accent); }
+    #chat-input::placeholder { color: var(--text2); }
+
+    .btn {
+      padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer;
+      font-size: 13px; font-family: var(--font); font-weight: 600;
+      transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #5576e8; }
+    .btn-secondary { background: var(--bg3); color: var(--text0); border: 1px solid var(--border); }
+    .btn-secondary:hover:not(:disabled) { background: var(--bg4); }
+    .btn-danger { background: var(--red); color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: #e85555; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
+    .btn-icon { padding: 8px; border-radius: 8px; background: var(--bg3); border: 1px solid var(--border); color: var(--text0); cursor: pointer; font-size: 16px; transition: all 0.15s; }
+    .btn-icon:hover { background: var(--bg4); }
+    .btn-icon.active { background: var(--red); color: #fff; border-color: var(--red); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(248,113,113,0.4)} 50%{box-shadow:0 0 0 6px rgba(248,113,113,0)} }
+
+    #status-line {
+      display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text2);
+      flex-wrap: wrap;
+    }
+    #token-counter { margin-left: auto; }
+
+    /* SIDE PANEL */
+    #side-panel {
+      width: var(--panel-w); min-width: var(--panel-w); max-width: var(--panel-w);
+      background: var(--bg1); border-left: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow: hidden;
+      transition: width 0.25s ease, min-width 0.25s ease;
+    }
+    #side-panel.collapsed { width: 0; min-width: 0; overflow: hidden; }
+
+    .panel-tabs {
+      display: flex; border-bottom: 1px solid var(--border); overflow-x: auto;
+      background: var(--bg1); flex-shrink: 0;
+    }
+    .panel-tab {
+      padding: 10px 14px; font-size: 12px; cursor: pointer; white-space: nowrap;
+      color: var(--text2); border-bottom: 2px solid transparent; transition: all 0.15s;
+    }
+    .panel-tab:hover { color: var(--text0); background: var(--bg2); }
+    .panel-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .panel-content { flex: 1; overflow-y: auto; display: none; padding: 14px; }
+    .panel-content.active { display: block; }
+
+    /* Panel sections */
+    .section { margin-bottom: 16px; }
+    .section-title {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.8px; color: var(--text2); margin-bottom: 8px;
+    }
+    .form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .form-row label { font-size: 12px; color: var(--text1); }
+    .form-input, .form-select {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 7px 10px; color: var(--text0);
+      font-size: 13px; font-family: var(--font); width: 100%; outline: none;
+      transition: border-color 0.15s;
+    }
+    .form-input:focus, .form-select:focus { border-color: var(--accent); }
+    .form-select option { background: var(--bg2); }
+
+    /* Toggle switch */
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .toggle-label { font-size: 13px; color: var(--text1); }
+    .toggle {
+      position: relative; width: 38px; height: 20px;
+      display: inline-block; flex-shrink: 0;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0; background: var(--bg4); border-radius: 20px;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .toggle-slider::before {
+      content: ''; position: absolute; width: 14px; height: 14px;
+      left: 3px; top: 3px; background: #fff; border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    input:checked + .toggle-slider { background: var(--accent); }
+    input:checked + .toggle-slider::before { transform: translateX(18px); }
+
+    /* Model cards */
+    .model-card {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 8px;
+    }
+    .model-card.active-model { border-color: var(--accent); }
+    .model-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .model-card-name { font-size: 13px; font-weight: 600; flex: 1; }
+    .model-card-badge {
+      font-size: 10px; padding: 2px 7px; border-radius: 10px;
+      background: var(--bg4); color: var(--text2); text-transform: uppercase;
+    }
+    .model-card-badge.loaded { background: rgba(74,222,128,0.15); color: var(--green); }
+    .model-card-badge.active { background: rgba(108,138,255,0.2); color: var(--accent); }
+    .model-card-badge.loading { background: rgba(251,191,36,0.15); color: var(--yellow); }
+    .model-card-size { font-size: 11px; color: var(--text2); margin-bottom: 6px; }
+    .model-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .model-progress {
+      margin: 6px 0; display: none;
+    }
+    .model-progress.visible { display: block; }
+    .model-progress-bar {
+      height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 2px; transition: width 0.3s ease; width: 0%;
+    }
+    .model-progress-text { font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+
+    /* Network ledger */
+    .ledger-entry {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 10px; margin-bottom: 6px; font-size: 12px; font-family: var(--mono);
+    }
+    .ledger-entry-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .ledger-method { font-size: 10px; padding: 2px 5px; border-radius: 3px; font-weight: 700; }
+    .ledger-method.POST { background: rgba(108,138,255,0.2); color: var(--accent); }
+    .ledger-method.GET { background: rgba(74,222,128,0.2); color: var(--green); }
+    .ledger-url { color: var(--text1); word-break: break-all; flex: 1; }
+    .ledger-time { color: var(--text2); font-size: 10px; flex-shrink: 0; }
+    .ledger-detail { color: var(--text2); font-size: 11px; }
+    .ledger-status { font-size: 10px; padding: 1px 5px; border-radius: 3px; }
+    .ledger-status.ok { background: rgba(74,222,128,0.15); color: var(--green); }
+    .ledger-status.err { background: rgba(248,113,113,0.15); color: var(--red); }
+
+    /* Actions log */
+    .action-entry {
+      padding: 6px 10px; border-left: 3px solid var(--bg4);
+      margin-bottom: 5px; font-size: 12px; background: var(--bg2);
+      border-radius: 0 6px 6px 0;
+    }
+    .action-entry.tool { border-left-color: var(--accent); }
+    .action-entry.search { border-left-color: var(--accent2); }
+    .action-entry.error { border-left-color: var(--red); }
+    .action-entry.info { border-left-color: var(--text2); }
+    .action-time { color: var(--text2); font-size: 10px; }
+    .action-name { font-weight: 600; color: var(--text1); }
+
+    /* Banner */
+    .banner {
+      padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 10px;
+      display: flex; align-items: flex-start; gap: 8px;
+    }
+    .banner.warn { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: var(--yellow); }
+    .banner.error { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--red); }
+    .banner.info { background: rgba(108,138,255,0.1); border: 1px solid rgba(108,138,255,0.3); color: var(--accent); }
+    .banner.success { background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.3); color: var(--green); }
+
+    /* Memory items */
+    .memory-item {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+      padding: 7px 10px; margin-bottom: 5px; font-size: 12px;
+      display: flex; align-items: flex-start; gap: 6px;
+    }
+    .memory-item-text { flex: 1; color: var(--text1); word-break: break-word; }
+    .memory-item-time { color: var(--text2); font-size: 10px; flex-shrink: 0; }
+
+    /* Capability banner (global top) */
+    #cap-banners { padding: 0 24px; padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+    #cap-banners:empty { display: none; }
+
+    /* Progress modal */
+    #global-progress {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      display: none; align-items: center; justify-content: center; z-index: 999;
+    }
+    #global-progress.visible { display: flex; }
+    #global-progress-box {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+      padding: 28px 36px; min-width: 380px; max-width: 90vw;
+    }
+    #global-progress-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+    #global-progress-bar-wrap { height: 8px; background: var(--bg4); border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
+    #global-progress-bar { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); width: 0%; transition: width 0.3s; border-radius: 4px; }
+    #global-progress-text { font-size: 13px; color: var(--text1); }
+
+    /* Responsive */
+    @media (max-width: 700px) {
+      #side-panel { position: fixed; right: 0; top: var(--topbar-h); bottom: 0; z-index: 200; }
+      #side-panel.collapsed { width: 0; }
+      #messages { padding: 12px; }
+      #input-bar { padding: 10px 12px; }
+    }
+
+    /* Utility */
+    .text-muted { color: var(--text2); }
+    .text-sm { font-size: 12px; }
+    .mt-2 { margin-top: 8px; }
+    .gap-1 { gap: 4px; }
+    hr.divider { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+    .flex { display: flex; }
+    .flex-col { flex-direction: column; }
+    .items-center { align-items: center; }
+    .justify-between { justify-content: space-between; }
+    .w-full { width: 100%; }
+    .overflow-hidden { overflow: hidden; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- TOP STATUS BAR -->
+  <div id="topbar">
+    <span class="logo">⚡ HERMES</span>
+    <span class="pill" id="pill-webgpu">
+      <span class="dot dot-gray" id="dot-webgpu"></span>
+      <span id="label-webgpu">WebGPU …</span>
+    </span>
+    <span class="pill" id="pill-model">
+      <span class="dot dot-gray" id="dot-model"></span>
+      <span id="label-model">No model</span>
+    </span>
+    <span class="pill" id="pill-mic" style="display:none">
+      <span class="dot dot-gray" id="dot-mic"></span>
+      <span id="label-mic">Mic</span>
+    </span>
+    <span class="pill" id="pill-lang" style="cursor:pointer" title="Click to toggle language">
+      <span id="label-lang">EN</span>
+    </span>
+    <span class="spacer"></span>
+    <button id="btn-panel-toggle" class="btn btn-secondary btn-sm">⚙ Panel</button>
+  </div>
+
+  <!-- MAIN BODY -->
+  <div id="main-body">
+
+    <!-- CHAT AREA -->
+    <div id="chat-area">
+      <div id="cap-banners"></div>
+      <div id="messages"></div>
+
+      <!-- INPUT BAR -->
+      <div id="input-bar">
+        <div id="input-row">
+          <button id="btn-voice" class="btn-icon" title="Push to talk (hold)" style="display:none">🎤</button>
+          <textarea id="chat-input" rows="1" placeholder="Message Hermes… (Enter to send, Shift+Enter for newline)"></textarea>
+          <button id="btn-stop" class="btn btn-danger" style="display:none" title="Stop generation">■ Stop</button>
+          <button id="btn-send" class="btn btn-primary" disabled>Send</button>
+        </div>
+        <div id="status-line">
+          <span id="status-text" class="text-muted">Load a model to start chatting</span>
+          <span id="token-counter" class="text-muted" style="display:none"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIDE PANEL -->
+    <div id="side-panel">
+      <div class="panel-tabs">
+        <div class="panel-tab active" data-tab="models">Models</div>
+        <div class="panel-tab" data-tab="voice">Voice</div>
+        <div class="panel-tab" data-tab="search">Search</div>
+        <div class="panel-tab" data-tab="actions">Actions</div>
+        <div class="panel-tab" data-tab="ledger">Network</div>
+        <div class="panel-tab" data-tab="memory">Memory</div>
+        <div class="panel-tab" data-tab="settings">Settings</div>
+      </div>
+
+      <!-- MODELS TAB -->
+      <div class="panel-content active" id="tab-models">
+        <div class="section">
+          <div class="section-title">Local Models (WebLLM)</div>
+          <div id="model-list"></div>
+        </div>
+        <hr class="divider">
+        <div class="section">
+          <div class="section-title">Cloud Models</div>
+          <div id="cloud-model-list"></div>
+          <button class="btn btn-secondary btn-sm w-full mt-2" id="btn-add-cloud">+ Add Cloud Model</button>
+        </div>
+      </div>
+
+      <!-- VOICE TAB -->
+      <div class="panel-content" id="tab-voice">
+        <div class="section">
+          <div class="section-title">Voice Input (Whisper ASR)</div>
+          <div id="voice-status-banner"></div>
+          <div class="form-row">
+            <label>ASR Model</label>
+            <select class="form-select" id="asr-model-select">
+              <option value="onnx-community/whisper-base">whisper-base (fast, ~145MB)</option>
+              <option value="onnx-community/whisper-small">whisper-small (~488MB)</option>
+              <option value="onnx-community/whisper-large-v3-turbo">whisper-large-v3-turbo (~1.6GB)</option>
+            </select>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Enable Voice Input</span>
+            <label class="toggle"><input type="checkbox" id="toggle-voice"><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Auto-submit after transcription</span>
+            <label class="toggle"><input type="checkbox" id="toggle-voice-auto"><span class="toggle-slider"></span></label>
+          </div>
+          <div id="voice-progress" style="display:none;margin:6px 0">
+            <div class="model-progress-text" id="voice-progress-text" style="font-size:11px;color:var(--text2);margin-bottom:3px"></div>
+            <div style="height:4px;background:var(--bg4);border-radius:2px;overflow:hidden">
+              <div id="voice-progress-bar" style="height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0%;transition:width 0.3s;border-radius:2px"></div>
+            </div>
+          </div>
+          <div id="voice-asr-status" class="text-sm text-muted mt-2"></div>
+        </div>
+        <hr class="divider">
+        <div class="section">
+          <div class="section-title">Text-to-Speech (Browser TTS)</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Enable TTS responses</span>
+            <label class="toggle"><input type="checkbox" id="toggle-tts"><span class="toggle-slider"></span></label>
+          </div>
+          <div class="form-row">
+            <label>TTS Voice</label>
+            <select class="form-select" id="tts-voice-select"><option>Loading…</option></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- SEARCH TAB -->
+      <div class="panel-content" id="tab-search">
+        <div class="section">
+          <div class="section-title">Primary: Gemini Grounding</div>
+          <div class="banner info text-sm">Sends queries to Google AI. Shown in Network ledger.</div>
+          <div class="form-row mt-2">
+            <label>Gemini API Key</label>
+            <input type="password" class="form-input" id="gemini-key" placeholder="AIza…" autocomplete="off"/>
+          </div>
+          <div class="form-row">
+            <label>Model</label>
+            <input type="text" class="form-input" id="gemini-search-model" value="gemini-2.5-flash"/>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Enable Gemini Search</span>
+            <label class="toggle"><input type="checkbox" id="toggle-gemini-search"><span class="toggle-slider"></span></label>
+          </div>
+        </div>
+        <hr class="divider">
+        <div class="section">
+          <div class="section-title">Alternate: Google Programmable Search</div>
+          <div class="form-row">
+            <label>API Key</label>
+            <input type="password" class="form-input" id="pse-key" placeholder="API key" autocomplete="off"/>
+          </div>
+          <div class="form-row">
+            <label>Search Engine ID (cx)</label>
+            <input type="text" class="form-input" id="pse-cx" placeholder="cx value"/>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Enable PSE Search</span>
+            <label class="toggle"><input type="checkbox" id="toggle-pse-search"><span class="toggle-slider"></span></label>
+          </div>
+        </div>
+        <hr class="divider">
+        <div class="section">
+          <div class="section-title">CORS Proxy (for fetch_url tool)</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Enable CORS Proxy</span>
+            <label class="toggle"><input type="checkbox" id="toggle-cors-proxy"><span class="toggle-slider"></span></label>
+          </div>
+          <div class="form-row">
+            <label>Proxy URL Prefix</label>
+            <input type="text" class="form-input" id="cors-proxy-url" placeholder="https://corsproxy.io/?"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- ACTIONS TAB -->
+      <div class="panel-content" id="tab-actions">
+        <div class="flex justify-between items-center" style="margin-bottom:8px">
+          <div class="section-title" style="margin:0">Action Log</div>
+          <button class="btn btn-secondary btn-sm" id="btn-clear-actions">Clear</button>
+        </div>
+        <div id="actions-log"></div>
+      </div>
+
+      <!-- NETWORK LEDGER TAB -->
+      <div class="panel-content" id="tab-ledger">
+        <div class="flex justify-between items-center" style="margin-bottom:8px">
+          <div class="section-title" style="margin:0">Network Ledger</div>
+          <button class="btn btn-secondary btn-sm" id="btn-clear-ledger">Clear</button>
+        </div>
+        <div id="ledger-log"></div>
+      </div>
+
+      <!-- MEMORY TAB -->
+      <div class="panel-content" id="tab-memory">
+        <div class="section">
+          <div class="section-title">Memory Store</div>
+          <!-- ROADMAP: tree memory — replace flat list with topic-tree structure -->
+          <div id="memory-list"></div>
+          <div class="form-row mt-2">
+            <input type="text" class="form-input" id="memory-add-input" placeholder="Add a memory…"/>
+          </div>
+          <button class="btn btn-secondary btn-sm w-full" id="btn-memory-add">Add Memory</button>
+        </div>
+        <hr class="divider">
+        <div class="section">
+          <div class="section-title">Conversation History</div>
+          <div class="flex gap-1">
+            <button class="btn btn-secondary btn-sm" id="btn-export">Export JSON</button>
+            <button class="btn btn-secondary btn-sm" id="btn-import-trigger">Import JSON</button>
+            <button class="btn btn-danger btn-sm" id="btn-clear-all">Clear All</button>
+          </div>
+          <input type="file" id="btn-import" accept=".json" style="display:none"/>
+        </div>
+      </div>
+
+      <!-- SETTINGS TAB -->
+      <div class="panel-content" id="tab-settings">
+        <div class="section">
+          <div class="section-title">Interface</div>
+          <div class="toggle-row">
+            <span class="toggle-label">Language</span>
+            <div class="flex gap-1">
+              <button class="btn btn-secondary btn-sm" id="btn-lang-en">EN</button>
+              <button class="btn btn-secondary btn-sm" id="btn-lang-fr">FR</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>System Prompt</label>
+            <textarea class="form-input" id="system-prompt-input" rows="5" placeholder="You are Hermes, a helpful AI assistant…"></textarea>
+          </div>
+        </div>
+        <hr class="divider">
+        <div class="section">
+          <div class="section-title">Chat Parameters</div>
+          <div class="form-row">
+            <label>Temperature: <span id="temp-display">0.7</span></label>
+            <input type="range" id="temperature" min="0" max="2" step="0.05" value="0.7" style="width:100%"/>
+          </div>
+          <div class="form-row">
+            <label>Max Tokens</label>
+            <input type="number" class="form-input" id="max-tokens" value="2048" min="64" max="8192"/>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Stream responses</span>
+            <label class="toggle"><input type="checkbox" id="toggle-stream" checked><span class="toggle-slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">Include usage stats</span>
+            <label class="toggle"><input type="checkbox" id="toggle-usage" checked><span class="toggle-slider"></span></label>
+          </div>
+        </div>
+        <hr class="divider">
+        <div class="section">
+          <div class="section-title">OpenAI-Compatible Endpoint</div>
+          <div class="form-row">
+            <label>Base URL</label>
+            <input type="text" class="form-input" id="openai-base-url" placeholder="https://api.openai.com/v1"/>
+          </div>
+          <div class="form-row">
+            <label>API Key</label>
+            <input type="password" class="form-input" id="openai-key" placeholder="sk-…" autocomplete="off"/>
+          </div>
+          <div class="form-row">
+            <label>Model ID</label>
+            <input type="text" class="form-input" id="openai-model-id" placeholder="gpt-4o-mini"/>
+          </div>
+          <button class="btn btn-secondary btn-sm w-full" id="btn-add-openai">Add as Cloud Model</button>
+        </div>
+        <hr class="divider">
+        <div class="section">
+          <div class="section-title">Gemini Cloud Chat</div>
+          <div class="form-row">
+            <label>Model ID</label>
+            <input type="text" class="form-input" id="gemini-chat-model" placeholder="gemini-2.5-flash"/>
+          </div>
+          <button class="btn btn-secondary btn-sm w-full" id="btn-add-gemini-cloud">Add Gemini as Cloud Model</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- GLOBAL PROGRESS OVERLAY -->
+<div id="global-progress">
+  <div id="global-progress-box">
+    <div id="global-progress-title">Loading model…</div>
+    <div id="global-progress-bar-wrap"><div id="global-progress-bar"></div></div>
+    <div id="global-progress-text">Initializing…</div>
+  </div>
+</div>
+
+<script type="module">
+// ============================================================
+// HERMES — Local-First AI Assistant
+// Single-file, browser-based, no build step required.
+// CDN deps loaded via ES modules from esm.run / jsDelivr.
+// ============================================================
+
+// ── CDN IMPORTS ──────────────────────────────────────────────
+import * as webllm from "https://esm.run/@mlc-ai/web-llm@0.2.84";
+import { marked } from "https://esm.run/marked@14";
+import DOMPurify from "https://esm.run/dompurify@3";
+
+// marked config
+marked.setOptions({ breaks: true, gfm: true });
+
+// ── CONSTANTS ─────────────────────────────────────────────────
+const VERSION = "1.0.0";
+const LS_KEY = "hermes_v1";
+
+/** Curated model list — filtered at runtime against prebuiltAppConfig */
+const CURATED_MODEL_IDS = [
+  "SmolLM2-360M-Instruct-q4f16_1-MLC",       // ~200MB  — fastest, tiny
+  "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",       // ~400MB  — multilingual, tiny
+  "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",       // ~1GB    — multilingual, small
+  "Qwen3-1.7B-q4f16_1-MLC",                  // ~1.2GB  — multilingual, recent
+  "Llama-3.2-3B-Instruct-q4f16_1-MLC",       // ~2GB    — balanced
+  "Phi-4-mini-instruct-q4f16_1-MLC",         // ~2.5GB  — strong reasoning
+  "Qwen2.5-7B-Instruct-q4f16_1-MLC",         // ~4.5GB  — powerful multilingual
+  "Llama-3.1-8B-Instruct-q4f16_1-MLC",       // ~5GB    — strong general
+  "gemma-2-2b-it-q4f16_1-MLC",               // ~1.5GB  — Google model
+];
+
+/** Human-readable size hints */
+const MODEL_SIZE_HINTS = {
+  "SmolLM2-360M-Instruct-q4f16_1-MLC": "~200 MB",
+  "Qwen2.5-0.5B-Instruct-q4f16_1-MLC": "~400 MB",
+  "Qwen2.5-1.5B-Instruct-q4f16_1-MLC": "~1 GB",
+  "Qwen3-1.7B-q4f16_1-MLC": "~1.2 GB",
+  "Llama-3.2-3B-Instruct-q4f16_1-MLC": "~2 GB",
+  "Phi-4-mini-instruct-q4f16_1-MLC": "~2.5 GB",
+  "Qwen2.5-7B-Instruct-q4f16_1-MLC": "~4.5 GB",
+  "Llama-3.1-8B-Instruct-q4f16_1-MLC": "~5 GB",
+  "gemma-2-2b-it-q4f16_1-MLC": "~1.5 GB",
+};
+
+// ── STATE ─────────────────────────────────────────────────────
+const State = {
+  // Runtime
+  webgpuAvailable: false,
+  micAvailable: false,
+  engine: null,            // WebLLM engine instance
+  activeModelId: null,     // currently loaded local model
+  loadedLocalModels: {},   // id -> true (tracks loaded state)
+  asrPipeline: null,       // transformers.js pipeline
+  asrLoaded: false,
+  asrLoading: false,
+  isRecording: false,
+  mediaRecorder: null,
+  audioChunks: [],
+  isSpeaking: false,
+  ttsUtterance: null,
+
+  // Conversation
+  messages: [],            // { role, content, timestamp, meta? }
+  language: "en",          // "en" | "fr"
+
+  // Settings (persisted)
+  settings: {
+    systemPrompt: "",
+    temperature: 0.7,
+    maxTokens: 2048,
+    stream: true,
+    includeUsage: true,
+    geminiKey: "",
+    geminiSearchModel: "gemini-2.5-flash",
+    geminiSearchEnabled: false,
+    pseKey: "",
+    pseCx: "",
+    pseEnabled: false,
+    corsProxyEnabled: false,
+    corsProxyUrl: "https://corsproxy.io/?",
+    asrModel: "onnx-community/whisper-base",
+    voiceEnabled: false,
+    voiceAutoSubmit: false,
+    ttsEnabled: false,
+    ttsVoiceName: "",
+    openaiBaseUrl: "",
+    openaiKey: "",
+    openaiModelId: "",
+    geminiChatModel: "gemini-2.5-flash",
+    cloudModels: [],        // [{id, label, type:'gemini'|'openai', baseUrl?, key, model}]
+    activeCloudModelId: null,
+    language: "en",
+  },
+
+  // Memory (persisted)
+  memory: [],              // [{id, text, timestamp}]
+
+  // UI
+  panelOpen: true,
+  activeTab: "models",
+  ledger: [],
+  actions: [],
+  availableLocalModels: [], // filtered against prebuiltAppConfig
+};
+
+// ── PERSISTENCE ───────────────────────────────────────────────
+function saveState() {
+  try {
+    const data = {
+      settings: State.settings,
+      memory: State.memory,
+      messages: State.messages.slice(-200), // keep last 200
+      language: State.language,
+    };
+    localStorage.setItem(LS_KEY, JSON.stringify(data));
+  } catch(e) { console.warn("Save failed:", e); }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (data.settings) Object.assign(State.settings, data.settings);
+    if (data.memory) State.memory = data.memory;
+    if (data.messages) State.messages = data.messages;
+    if (data.language) State.language = data.language;
+  } catch(e) { console.warn("Load state failed:", e); }
+}
+
+// ── CAPABILITY DETECTION ──────────────────────────────────────
+async function detectCapabilities() {
+  // WebGPU
+  try {
+    if (navigator.gpu) {
+      const adapter = await navigator.gpu.requestAdapter();
+      State.webgpuAvailable = !!adapter;
+    }
+  } catch(e) { State.webgpuAvailable = false; }
+
+  updateTopbar();
+
+  if (!State.webgpuAvailable) {
+    addCapBanner("warn",
+      "⚠ WebGPU not available in this browser. Local LLM inference will be very slow or unavailable. " +
+      "Enable chrome://flags/#enable-unsafe-webgpu or use Chrome 113+.");
+  }
+
+  // Mic
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const hasMic = devices.some(d => d.kind === "audioinput");
+    State.micAvailable = hasMic;
+    if (hasMic) {
+      document.getElementById("btn-voice").style.display = "flex";
+      document.getElementById("pill-mic").style.display = "inline-flex";
+      updateMicPill("idle");
+    }
+  } catch(e) {
+    State.micAvailable = false;
+    addCapBanner("warn", "⚠ Microphone not accessible. Voice input disabled.");
+    document.getElementById("voice-status-banner").innerHTML =
+      '<div class="banner warn">Microphone access denied or unavailable.</div>';
+  }
+}
+
+function addCapBanner(type, text) {
+  const div = document.createElement("div");
+  div.className = `banner ${type}`;
+  div.textContent = text;
+  document.getElementById("cap-banners").appendChild(div);
+}
+
+// ── TOP BAR ───────────────────────────────────────────────────
+function updateTopbar() {
+  const dotW = document.getElementById("dot-webgpu");
+  const lblW = document.getElementById("label-webgpu");
+  dotW.className = "dot " + (State.webgpuAvailable ? "dot-green" : "dot-red");
+  lblW.textContent = State.webgpuAvailable ? "WebGPU ✓" : "WebGPU ✗";
+
+  const dotM = document.getElementById("dot-model");
+  const lblM = document.getElementById("label-model");
+  if (State.activeModelId) {
+    dotM.className = "dot dot-green";
+    const short = State.activeModelId.replace(/-q[0-9].*/, "").replace(/-MLC.*/, "");
+    lblM.textContent = short;
+  } else if (State.settings.activeCloudModelId) {
+    dotM.className = "dot dot-yellow";
+    lblM.textContent = State.settings.activeCloudModelId;
+  } else {
+    dotM.className = "dot dot-gray";
+    lblM.textContent = "No model";
+  }
+
+  document.getElementById("label-lang").textContent = State.language.toUpperCase();
+}
+
+function updateMicPill(state) {
+  const dot = document.getElementById("dot-mic");
+  const lbl = document.getElementById("label-mic");
+  if (state === "recording") {
+    dot.className = "dot dot-red";
+    lbl.textContent = "● REC";
+  } else if (state === "idle") {
+    dot.className = "dot " + (State.settings.voiceEnabled ? "dot-green" : "dot-gray");
+    lbl.textContent = "Mic";
+  }
+}
+
+// ── PANEL TABS ────────────────────────────────────────────────
+function initTabs() {
+  document.querySelectorAll(".panel-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const name = tab.dataset.tab;
+      State.activeTab = name;
+      document.querySelectorAll(".panel-tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+      document.querySelectorAll(".panel-content").forEach(c => c.classList.toggle("active", c.id === `tab-${name}`));
+    });
+  });
+
+  document.getElementById("btn-panel-toggle").addEventListener("click", () => {
+    State.panelOpen = !State.panelOpen;
+    document.getElementById("side-panel").classList.toggle("collapsed", !State.panelOpen);
+    document.getElementById("btn-panel-toggle").textContent = State.panelOpen ? "⚙ Panel" : "⚙ Panel";
+  });
+
+  // Language pill click
+  document.getElementById("pill-lang").addEventListener("click", () => {
+    setLanguage(State.language === "en" ? "fr" : "en");
+  });
+}
+
+// ── SETTINGS PANEL BINDING ────────────────────────────────────
+function bindSettings() {
+  const s = State.settings;
+
+  const bind = (id, key, type = "value") => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (type === "checked") {
+      el.checked = s[key];
+      el.addEventListener("change", () => { s[key] = el.checked; saveState(); onSettingChange(key, el.checked); });
+    } else {
+      el.value = s[key] || "";
+      el.addEventListener("input", () => { s[key] = el.value; saveState(); onSettingChange(key, el.value); });
+      el.addEventListener("change", () => { s[key] = el.value; saveState(); onSettingChange(key, el.value); });
+    }
+  };
+
+  bind("gemini-key", "geminiKey");
+  bind("gemini-search-model", "geminiSearchModel");
+  bind("toggle-gemini-search", "geminiSearchEnabled", "checked");
+  bind("pse-key", "pseKey");
+  bind("pse-cx", "pseCx");
+  bind("toggle-pse-search", "pseEnabled", "checked");
+  bind("toggle-cors-proxy", "corsProxyEnabled", "checked");
+  bind("cors-proxy-url", "corsProxyUrl");
+  bind("asr-model-select", "asrModel");
+  bind("toggle-voice", "voiceEnabled", "checked");
+  bind("toggle-voice-auto", "voiceAutoSubmit", "checked");
+  bind("toggle-tts", "ttsEnabled", "checked");
+  bind("system-prompt-input", "systemPrompt");
+  bind("toggle-stream", "stream", "checked");
+  bind("toggle-usage", "includeUsage", "checked");
+  bind("openai-base-url", "openaiBaseUrl");
+  bind("openai-key", "openaiKey");
+  bind("openai-model-id", "openaiModelId");
+  bind("gemini-chat-model", "geminiChatModel");
+
+  // Temperature slider
+  const tempSlider = document.getElementById("temperature");
+  tempSlider.value = s.temperature;
+  document.getElementById("temp-display").textContent = s.temperature;
+  tempSlider.addEventListener("input", () => {
+    s.temperature = parseFloat(tempSlider.value);
+    document.getElementById("temp-display").textContent = s.temperature.toFixed(2);
+    saveState();
+  });
+
+  // Max tokens
+  const maxTok = document.getElementById("max-tokens");
+  maxTok.value = s.maxTokens;
+  maxTok.addEventListener("change", () => { s.maxTokens = parseInt(maxTok.value) || 2048; saveState(); });
+
+  // Language buttons
+  document.getElementById("btn-lang-en").addEventListener("click", () => setLanguage("en"));
+  document.getElementById("btn-lang-fr").addEventListener("click", () => setLanguage("fr"));
+
+  // Cloud model buttons
+  document.getElementById("btn-add-openai").addEventListener("click", addOpenAICloudModel);
+  document.getElementById("btn-add-gemini-cloud").addEventListener("click", addGeminiCloudModel);
+  document.getElementById("btn-add-cloud").addEventListener("click", () => {
+    switchTab("settings");
+  });
+
+  // Memory buttons
+  document.getElementById("btn-memory-add").addEventListener("click", () => {
+    const inp = document.getElementById("memory-add-input");
+    if (inp.value.trim()) { memoryRemember(inp.value.trim()); inp.value = ""; }
+  });
+  document.getElementById("memory-add-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") { document.getElementById("btn-memory-add").click(); }
+  });
+
+  // Export/Import
+  document.getElementById("btn-export").addEventListener("click", exportData);
+  document.getElementById("btn-import-trigger").addEventListener("click", () => document.getElementById("btn-import").click());
+  document.getElementById("btn-import").addEventListener("change", importData);
+  document.getElementById("btn-clear-all").addEventListener("click", clearAll);
+
+  // Clear logs
+  document.getElementById("btn-clear-actions").addEventListener("click", () => {
+    State.actions = []; renderActions();
+  });
+  document.getElementById("btn-clear-ledger").addEventListener("click", () => {
+    State.ledger = []; renderLedger();
+  });
+}
+
+function onSettingChange(key, value) {
+  if (key === "voiceEnabled") { updateMicPill("idle"); renderVoiceTab(); }
+  if (key === "ttsEnabled" && !value && State.isSpeaking) { speechSynthesis.cancel(); State.isSpeaking = false; }
+  if (key === "asrModel") { State.asrPipeline = null; State.asrLoaded = false; }
+}
+
+function switchTab(name) {
+  document.querySelectorAll(".panel-tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+  document.querySelectorAll(".panel-content").forEach(c => c.classList.toggle("active", c.id === `tab-${name}`));
+  State.activeTab = name;
+  if (!State.panelOpen) {
+    State.panelOpen = true;
+    document.getElementById("side-panel").classList.remove("collapsed");
+  }
+}
+
+function setLanguage(lang) {
+  State.language = lang;
+  State.settings.language = lang;
+  saveState();
+  updateTopbar();
+  // Update placeholder
+  document.getElementById("chat-input").placeholder =
+    lang === "fr" ? "Envoyer un message à Hermes… (Entrée pour envoyer)" :
+                    "Message Hermes… (Enter to send, Shift+Enter for newline)";
+  logAction("info", "set_language", `Language set to ${lang.toUpperCase()}`);
+}
+
+// ── MODEL MANAGER ─────────────────────────────────────────────
+function initModelManager() {
+  // Filter curated list against actual prebuiltAppConfig
+  const available = new Set(webllm.prebuiltAppConfig.model_list.map(m => m.model_id));
+  State.availableLocalModels = CURATED_MODEL_IDS.filter(id => available.has(id));
+
+  if (State.availableLocalModels.length === 0) {
+    // Fallback: pick first few from prebuiltAppConfig that look instruct-capable
+    State.availableLocalModels = webllm.prebuiltAppConfig.model_list
+      .filter(m => m.model_id.match(/Instruct|instruct|it-q|chat/i))
+      .slice(0, 8)
+      .map(m => m.model_id);
+  }
+
+  renderModelList();
+}
+
+function renderModelList() {
+  const container = document.getElementById("model-list");
+  container.innerHTML = "";
+
+  for (const modelId of State.availableLocalModels) {
+    const isActive = State.activeModelId === modelId;
+    const isLoaded = !!State.loadedLocalModels[modelId];
+    const isLoading = State._loadingModelId === modelId;
+    const size = MODEL_SIZE_HINTS[modelId] || "~?";
+    const shortName = modelId.replace(/-q[0-9f].*/, "").replace(/-MLC$/, "");
+
+    const card = document.createElement("div");
+    card.className = "model-card" + (isActive ? " active-model" : "");
+    card.id = `model-card-${modelId.replace(/[^a-z0-9]/gi, "_")}`;
+    card.innerHTML = `
+      <div class="model-card-header">
+        <span class="model-card-name">${shortName}</span>
+        <span class="model-card-badge ${isActive ? "active" : isLoading ? "loading" : isLoaded ? "loaded" : ""}">
+          ${isActive ? "Active" : isLoading ? "Loading…" : isLoaded ? "Loaded" : "Idle"}
+        </span>
+      </div>
+      <div class="model-card-size">${size} • q4f16</div>
+      <div class="model-progress ${isLoading ? "visible" : ""}" id="progress-${card.id}">
+        <div class="model-progress-text" id="progress-text-${card.id}">Downloading…</div>
+        <div style="height:4px;background:var(--bg4);border-radius:2px;overflow:hidden">
+          <div class="model-progress-bar" id="progress-bar-${card.id}" style="width:0%"></div>
+        </div>
+      </div>
+      <div class="model-card-actions" id="actions-${card.id}">
+        ${!isLoaded && !isLoading ? `<button class="btn btn-primary btn-sm" data-action="load" data-id="${modelId}">Load</button>` : ""}
+        ${isLoaded && !isActive ? `<button class="btn btn-primary btn-sm" data-action="activate" data-id="${modelId}">Set Active</button>` : ""}
+        ${isLoaded ? `<button class="btn btn-secondary btn-sm" data-action="unload" data-id="${modelId}">Unload</button>` : ""}
+        ${isLoading ? `<span class="text-sm text-muted">Loading…</span>` : ""}
+      </div>
+    `;
+
+    card.addEventListener("click", e => {
+      const btn = e.target.closest("[data-action]");
+      if (!btn) return;
+      const action = btn.dataset.action;
+      const id = btn.dataset.id;
+      if (action === "load") loadLocalModel(id);
+      else if (action === "activate") setActiveLocalModel(id);
+      else if (action === "unload") unloadLocalModel(id);
+    });
+
+    container.appendChild(card);
+  }
+
+  renderCloudModelList();
+}
+
+async function loadLocalModel(modelId) {
+  if (State._loadingModelId) {
+    addSystemMsg(State.language === "fr"
+      ? "Un modèle est déjà en cours de chargement."
+      : "A model is already loading. Please wait.");
+    return;
+  }
+
+  State._loadingModelId = modelId;
+  renderModelList();
+  updateSendButton();
+
+  // Show global progress overlay
+  const overlay = document.getElementById("global-progress");
+  const bar = document.getElementById("global-progress-bar");
+  const txt = document.getElementById("global-progress-text");
+  const title = document.getElementById("global-progress-title");
+  title.textContent = `Loading ${modelId.replace(/-q[0-9].*/, "")}`;
+  bar.style.width = "0%";
+  txt.textContent = "Initializing…";
+  overlay.classList.add("visible");
+
+  logAction("info", "load_model", `Loading ${modelId}`);
+
+  try {
+    const initProgressCallback = (p) => {
+      const pct = Math.round((p.progress || 0) * 100);
+      bar.style.width = pct + "%";
+      txt.textContent = p.text || `${pct}%`;
+
+      // Also update card
+      const safeId = `model-card-${modelId.replace(/[^a-z0-9]/gi, "_")}`;
+      const pbar = document.getElementById(`progress-bar-${safeId}`);
+      const ptxt = document.getElementById(`progress-text-${safeId}`);
+      if (pbar) pbar.style.width = pct + "%";
+      if (ptxt) ptxt.textContent = p.text || `${pct}%`;
+    };
+
+    State.engine = await webllm.CreateMLCEngine(modelId, {
+      initProgressCallback,
+      appConfig: webllm.prebuiltAppConfig,
+    });
+
+    State.loadedLocalModels[modelId] = true;
+    State.activeModelId = modelId;
+    State.settings.activeCloudModelId = null;
+    State._loadingModelId = null;
+
+    logAction("info", "load_model", `Model ${modelId} loaded and active`);
+    addSystemMsg(State.language === "fr"
+      ? `Modèle ${modelId.replace(/-q[0-9].*/,"")} chargé et actif.`
+      : `Model ${modelId.replace(/-q[0-9].*/,"")} loaded and active.`);
+
+  } catch(err) {
+    State._loadingModelId = null;
+    logAction("error", "load_model", `Failed: ${err.message}`);
+    addSystemMsg(`Error loading model: ${err.message}`, "error");
+    console.error("WebLLM load error:", err);
+  } finally {
+    overlay.classList.remove("visible");
+    renderModelList();
+    updateTopbar();
+    updateSendButton();
+  }
+}
+
+async function setActiveLocalModel(modelId) {
+  if (!State.loadedLocalModels[modelId]) { await loadLocalModel(modelId); return; }
+  if (State.activeModelId === modelId) return;
+
+  try {
+    await State.engine.reload(modelId);
+    State.activeModelId = modelId;
+    State.settings.activeCloudModelId = null;
+    renderModelList();
+    updateTopbar();
+    updateSendButton();
+    logAction("info", "set_model", `Switched to ${modelId}`);
+  } catch(e) {
+    logAction("error", "set_model", `Failed: ${e.message}`);
+  }
+}
+
+async function unloadLocalModel(modelId) {
+  try {
+    if (State.engine && State.activeModelId === modelId) {
+      await State.engine.unload();
+      State.activeModelId = null;
+    }
+    delete State.loadedLocalModels[modelId];
+    renderModelList();
+    updateTopbar();
+    updateSendButton();
+    logAction("info", "unload_model", `Unloaded ${modelId}`);
+  } catch(e) {
+    logAction("error", "unload_model", `Failed: ${e.message}`);
+  }
+}
+
+// ── CLOUD MODELS ──────────────────────────────────────────────
+function addOpenAICloudModel() {
+  const baseUrl = document.getElementById("openai-base-url").value.trim();
+  const key = document.getElementById("openai-key").value.trim();
+  const modelId = document.getElementById("openai-model-id").value.trim();
+  if (!modelId) { alert("Enter a model ID"); return; }
+
+  const id = `openai:${modelId}`;
+  const existing = State.settings.cloudModels.findIndex(m => m.id === id);
+  const record = { id, label: modelId, type: "openai", baseUrl: baseUrl || "https://api.openai.com/v1", key, model: modelId };
+  if (existing >= 0) State.settings.cloudModels[existing] = record;
+  else State.settings.cloudModels.push(record);
+
+  saveState();
+  renderCloudModelList();
+  addSystemMsg(`Cloud model added: ${modelId}`);
+}
+
+function addGeminiCloudModel() {
+  const modelId = document.getElementById("gemini-chat-model").value.trim() || "gemini-2.5-flash";
+  const key = State.settings.geminiKey;
+  const id = `gemini:${modelId}`;
+  const existing = State.settings.cloudModels.findIndex(m => m.id === id);
+  const record = { id, label: `Gemini ${modelId}`, type: "gemini", key, model: modelId };
+  if (existing >= 0) State.settings.cloudModels[existing] = record;
+  else State.settings.cloudModels.push(record);
+
+  saveState();
+  renderCloudModelList();
+  addSystemMsg(`Cloud model added: Gemini ${modelId}`);
+}
+
+function renderCloudModelList() {
+  const container = document.getElementById("cloud-model-list");
+  container.innerHTML = "";
+
+  if (State.settings.cloudModels.length === 0) {
+    container.innerHTML = '<div class="text-sm text-muted">No cloud models added. Add from Settings tab.</div>';
+    return;
+  }
+
+  for (const cm of State.settings.cloudModels) {
+    const isActive = State.settings.activeCloudModelId === cm.id;
+    const card = document.createElement("div");
+    card.className = "model-card" + (isActive ? " active-model" : "");
+    card.innerHTML = `
+      <div class="model-card-header">
+        <span class="model-card-name">${escHtml(cm.label)}</span>
+        <span class="model-card-badge ${isActive ? "active" : ""}">${isActive ? "Active" : escHtml(cm.type.toUpperCase())}</span>
+      </div>
+      <div class="model-card-actions">
+        ${!isActive ? `<button class="btn btn-primary btn-sm" data-action="activate-cloud" data-id="${escHtml(cm.id)}">Set Active</button>` : ""}
+        <button class="btn btn-secondary btn-sm" data-action="remove-cloud" data-id="${escHtml(cm.id)}">Remove</button>
+      </div>
+    `;
+    card.addEventListener("click", e => {
+      const btn = e.target.closest("[data-action]");
+      if (!btn) return;
+      if (btn.dataset.action === "activate-cloud") setActiveCloudModel(btn.dataset.id);
+      if (btn.dataset.action === "remove-cloud") removeCloudModel(btn.dataset.id);
+    });
+    container.appendChild(card);
+  }
+}
+
+function setActiveCloudModel(id) {
+  State.settings.activeCloudModelId = id;
+  State.activeModelId = null; // deactivate local
+  saveState();
+  renderCloudModelList();
+  renderModelList();
+  updateTopbar();
+  updateSendButton();
+  const cm = State.settings.cloudModels.find(m => m.id === id);
+  logAction("info", "set_model", `Cloud model active: ${cm?.label}`);
+}
+
+function removeCloudModel(id) {
+  State.settings.cloudModels = State.settings.cloudModels.filter(m => m.id !== id);
+  if (State.settings.activeCloudModelId === id) State.settings.activeCloudModelId = null;
+  saveState();
+  renderCloudModelList();
+  updateTopbar();
+  updateSendButton();
+}
+
+// ── CHAT ──────────────────────────────────────────────────────
+function initChat() {
+  const input = document.getElementById("chat-input");
+  const sendBtn = document.getElementById("btn-send");
+
+  input.addEventListener("input", () => {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+    updateSendButton();
+  });
+
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!sendBtn.disabled) sendMessage();
+    }
+  });
+
+  sendBtn.addEventListener("click", sendMessage);
+
+  document.getElementById("btn-stop").addEventListener("click", () => {
+    State._stopRequested = true;
+    if (State.engine) {
+      // WebLLM doesn't have an explicit abort but setting _stopRequested lets
+      // runAgenticLoop exit after the current token stream finishes
+      try { State.engine.interruptGenerate?.(); } catch(e) {}
+    }
+    logAction("info", "stop", "Generation stopped by user");
+  });
+
+  // Restore conversation
+  for (const msg of State.messages) {
+    renderMessage(msg.role, msg.content, msg.meta, false);
+  }
+  if (State.messages.length === 0) {
+    addSystemMsg(State.language === "fr"
+      ? "Bonjour ! Chargez un modèle pour commencer à discuter."
+      : "Welcome to Hermes! Load a model from the Models panel to start chatting.");
+  }
+}
+
+function updateSendButton() {
+  const input = document.getElementById("chat-input");
+  const hasModel = !!State.activeModelId || !!State.settings.activeCloudModelId;
+  const hasText = input.value.trim().length > 0;
+  const busy = !!State._generating;
+
+  document.getElementById("btn-send").disabled = !hasModel || !hasText || busy;
+  document.getElementById("btn-send").style.display = busy ? "none" : "inline-flex";
+  document.getElementById("btn-stop").style.display = busy ? "inline-flex" : "none";
+
+  const statusEl = document.getElementById("status-text");
+  if (!hasModel) {
+    statusEl.textContent = State.language === "fr" ? "Chargez un modèle pour commencer" : "Load a model to start chatting";
+  } else if (busy) {
+    statusEl.textContent = State.language === "fr" ? "Génération en cours…" : "Generating…";
+  } else {
+    const modelLabel = State.activeModelId
+      ? State.activeModelId.replace(/-q[0-9].*/, "")
+      : State.settings.cloudModels.find(m => m.id === State.settings.activeCloudModelId)?.label || "";
+    statusEl.textContent = State.language === "fr" ? `Modèle actif : ${modelLabel}` : `Active model: ${modelLabel}`;
+  }
+}
+
+async function sendMessage(userText) {
+  if (State._generating) return; // ignore while busy
+  const input = document.getElementById("chat-input");
+  const text = (typeof userText === "string" ? userText : "") || input.value.trim();
+  if (!text) return;
+
+  input.value = "";
+  input.style.height = "auto";
+  updateSendButton();
+
+  // Pre-router: check for deterministic commands first
+  if (await preRouter(text)) return;
+
+  // Add user message
+  const userMsg = { role: "user", content: text, timestamp: Date.now() };
+  State.messages.push(userMsg);
+  renderMessage("user", text);
+  saveState();
+  scrollToBottom();
+
+  // Generate response
+  await generateResponse(text);
+}
+
+// ── DETERMINISTIC PRE-ROUTER ───────────────────────────────────
+async function preRouter(text) {
+  const t = text.trim().toLowerCase();
+
+  // Slash commands
+  if (t.startsWith("/help")) {
+    addSystemMsg(getHelpText());
+    return true;
+  }
+  if (t.startsWith("/clear")) {
+    clearContext();
+    return true;
+  }
+  if (t.startsWith("/lang ")) {
+    const lang = t.split(" ")[1];
+    if (lang === "fr" || lang === "french") setLanguage("fr");
+    else setLanguage("en");
+    addSystemMsg(`Language set to ${State.language.toUpperCase()}`);
+    return true;
+  }
+  if (t.startsWith("/search ") || t.startsWith("/recherche ")) {
+    const query = text.replace(/^\/(search|recherche)\s+/i, "");
+    await toolWebSearch(query, true);
+    return true;
+  }
+  if (t.startsWith("/remember ")) {
+    const mem = text.replace(/^\/remember\s+/i, "");
+    memoryRemember(mem);
+    addSystemMsg(`Remembered: "${mem}"`);
+    return true;
+  }
+  if (t.startsWith("/recall ") || t === "/recall") {
+    const query = text.replace(/^\/recall\s*/i, "");
+    const results = memoryRecall(query);
+    addSystemMsg(results.length ? `Memory:\n${results.map(m => `• ${m.text}`).join("\n")}` : "No memories found.");
+    return true;
+  }
+  if (t.startsWith("/model ")) {
+    const id = text.replace(/^\/model\s+/i, "").trim();
+    await toolSetModel(id);
+    return true;
+  }
+  if (t === "/datetime" || t === "/date") {
+    const dt = toolCurrentDatetime();
+    addSystemMsg(dt);
+    return true;
+  }
+
+  // Natural language commands (spoken or typed)
+  if (/^(switch|change|passer)\s+(to\s+)?(french|français|fr)\b/i.test(t)) {
+    setLanguage("fr"); addSystemMsg("Langue définie sur FR"); return true;
+  }
+  if (/^(switch|change|passer)\s+(to\s+)?(english|anglais|en)\b/i.test(t)) {
+    setLanguage("en"); addSystemMsg("Language set to EN"); return true;
+  }
+  if (/^(search|search the web for|recherche)\s+(.+)/i.test(t)) {
+    const m = t.match(/^(?:search the web for|search|recherche)\s+(.+)/i);
+    if (m) { await toolWebSearch(m[1], true); return true; }
+  }
+
+  return false; // pass to LLM
+}
+
+function getHelpText() {
+  return `**Hermes Commands**
+/help — Show this help
+/clear — Clear conversation context
+/lang fr|en — Switch language
+/search <query> — Web search
+/remember <text> — Save to memory
+/recall [query] — Recall memories
+/model <id> — Switch model
+/datetime — Current date/time
+
+**Agentic tools available to the LLM:**
+web_search, fetch_url, set_language, set_model, clear_context, remember, recall, calculate, current_datetime`;
+}
+
+// ── LLM GENERATION ────────────────────────────────────────────
+// Max agentic tool-call iterations to prevent infinite loops
+const MAX_TOOL_ITERATIONS = 6;
+
+async function generateResponse(userText) {
+  // Top-level entry guard — only the outermost call manages _generating flag
+  const isTopLevel = !State._generating;
+  if (isTopLevel) {
+    State._generating = true;
+    updateSendButton();
+  }
+
+  const typingId = addTypingIndicator();
+
+  try {
+    await runAgenticLoop(typingId);
+  } catch(e) {
+    removeTypingIndicator(typingId);
+    addSystemMsg(`Generation error: ${e.message}`, "error");
+    console.error("Generation error:", e);
+  } finally {
+    if (isTopLevel) {
+      State._generating = false;
+      updateSendButton();
+    }
+  }
+}
+
+function buildMessages() {
+  const msgs = [];
+
+  // System prompt
+  const sysPrompt = State.settings.systemPrompt || getDefaultSystemPrompt();
+  msgs.push({ role: "system", content: sysPrompt });
+
+  // Conversation history (last 40 messages to keep context reasonable)
+  // Include tool-result messages (marked _isTool) as "user" role turns
+  const history = State.messages.slice(-40);
+  for (const m of history) {
+    if (m.role === "user" || m.role === "assistant") {
+      msgs.push({ role: m.role, content: m.content });
+    }
+  }
+  return msgs;
+}
+
+function getDefaultSystemPrompt() {
+  const lang = State.language;
+  const tools = `
+You have access to these tools. Call them by outputting a JSON block in a fenced code block with language tag "tool_call":
+\`\`\`tool_call
+{"tool": "<name>", "args": {...}}
+\`\`\`
+
+Available tools:
+- web_search(query: string) — Search the web
+- fetch_url(url: string) — Fetch and extract text from a URL
+- set_language(lang: "en"|"fr") — Change UI language
+- set_model(id: string) — Switch active model
+- clear_context() — Clear conversation history
+- remember(text: string) — Save to memory store
+- recall(query: string) — Search memory store
+- calculate(expr: string) — Safely evaluate a math expression
+- current_datetime() — Get current date and time
+
+After a tool call, you will receive a tool result and should continue to answer the user.
+`;
+
+  if (lang === "fr") {
+    return `Tu es Hermes, un assistant IA local et intelligent. Tu réponds en français par défaut, mais tu peux répondre dans la langue de l'utilisateur. Tu es précis, utile et concis. La date actuelle est ${new Date().toLocaleDateString("fr-FR", {weekday:"long",year:"numeric",month:"long",day:"numeric"})}.
+${tools}`;
+  }
+  return `You are Hermes, a local, private, and intelligent AI assistant. You run entirely in the user's browser. Be helpful, accurate, and concise. Current date: ${new Date().toLocaleDateString("en-US", {weekday:"long",year:"numeric",month:"long",day:"numeric"})}.
+${tools}`;
+}
+
+/** Generate one local LLM turn; returns content string */
+async function generateLocalTurn(typingId) {
+  const messages = buildMessages();
+  const s = State.settings;
+
+  let fullContent = "";
+  let msgEl = null;
+  let usageInfo = null;
+
+  if (s.stream) {
+    const chunks = await State.engine.chat.completions.create({
+      messages,
+      stream: true,
+      stream_options: s.includeUsage ? { include_usage: true } : undefined,
+      temperature: s.temperature,
+      max_tokens: s.maxTokens,
+    });
+
+    for await (const chunk of chunks) {
+      const delta = chunk.choices[0]?.delta?.content || "";
+      fullContent += delta;
+
+      if (typingId && !msgEl) {
+        removeTypingIndicator(typingId);
+        msgEl = renderMessage("assistant", fullContent, null, true);
+      } else if (msgEl) {
+        updateStreamingMessage(msgEl, fullContent);
+      }
+
+      if (chunk.usage) usageInfo = chunk.usage;
+    }
+  } else {
+    const resp = await State.engine.chat.completions.create({
+      messages,
+      stream: false,
+      temperature: s.temperature,
+      max_tokens: s.maxTokens,
+    });
+    fullContent = resp.choices[0]?.message?.content || "";
+    usageInfo = resp.usage;
+    removeTypingIndicator(typingId);
+    msgEl = renderMessage("assistant", fullContent);
+  }
+
+  if (!msgEl) {
+    removeTypingIndicator(typingId);
+    msgEl = renderMessage("assistant", fullContent || "(empty response)");
+  }
+
+  // Show token usage
+  if (usageInfo && s.includeUsage) {
+    const meta = `${usageInfo.prompt_tokens || 0} in / ${usageInfo.completion_tokens || 0} out tokens`;
+    document.getElementById("token-counter").textContent = meta;
+    document.getElementById("token-counter").style.display = "inline";
+  }
+
+  // Save to history
+  State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
+  saveState();
+
+  // TTS only if this is a final answer (no tool call)
+  if (s.ttsEnabled && fullContent && !parseFirstToolCall(fullContent)) speakText(fullContent);
+
+  scrollToBottom();
+  return fullContent;
+}
+
+
+async function generateCloudTurn(typingId) {
+  const cm = State.settings.cloudModels.find(m => m.id === State.settings.activeCloudModelId);
+  if (!cm) { removeTypingIndicator(typingId); addSystemMsg("No cloud model found."); return ""; }
+
+  const messages = buildMessages();
+  let content = "";
+
+  try {
+    if (cm.type === "gemini") {
+      content = await generateGeminiTurn(cm, messages, typingId);
+    } else if (cm.type === "openai") {
+      content = await generateOpenAITurn(cm, messages, typingId);
+    }
+  } catch(e) {
+    removeTypingIndicator(typingId);
+    addSystemMsg(`Cloud model error: ${e.message}`, "error");
+  }
+  return content;
+}
+
+async function generateGeminiTurn(cm, messages, typingId) {
+  const key = cm.key || State.settings.geminiKey;
+  if (!key) {
+    removeTypingIndicator(typingId);
+    addSystemMsg("Gemini API key required. Add it in Search tab.");
+    return "";
+  }
+
+  // Convert messages to Gemini format
+  // Filter out internal tool-result messages tagged with _isTool for proper role handling
+  const contents = messages.filter(m => m.role !== "system").map(m => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }]
+  }));
+  const systemInstruction = messages.find(m => m.role === "system")?.content;
+
+  const body = { contents };
+  if (systemInstruction) body.system_instruction = { parts: [{ text: systemInstruction }] };
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cm.model}:generateContent`;
+  ledgerAdd("POST", url, "Gemini cloud chat");
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify(body)
+  });
+
+  ledgerUpdate(resp.ok ? "ok" : "err", resp.status);
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    removeTypingIndicator(typingId);
+    addSystemMsg(`Gemini error ${resp.status}: ${errText.slice(0,300)}`, "error");
+    return "";
+  }
+
+  const data = await resp.json();
+  const content = data.candidates?.[0]?.content?.parts?.map(p => p.text).join("") || "(no response)";
+
+  removeTypingIndicator(typingId);
+  renderMessage("assistant", content);
+  State.messages.push({ role: "assistant", content, timestamp: Date.now() });
+  saveState();
+
+  if (State.settings.ttsEnabled && !parseFirstToolCall(content)) speakText(content);
+  scrollToBottom();
+  return content;
+}
+
+async function generateOpenAITurn(cm, messages, typingId) {
+  const url = `${cm.baseUrl}/chat/completions`;
+  ledgerAdd("POST", url, "OpenAI-compatible chat");
+
+  const body = {
+    model: cm.model,
+    messages,
+    temperature: State.settings.temperature,
+    max_tokens: State.settings.maxTokens,
+    stream: State.settings.stream,
+  };
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${cm.key}` },
+    body: JSON.stringify(body)
+  });
+
+  ledgerUpdate(resp.ok ? "ok" : "err", resp.status);
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    removeTypingIndicator(typingId);
+    addSystemMsg(`OpenAI error ${resp.status}: ${errText.slice(0,300)}`, "error");
+    return "";
+  }
+
+  let fullContent = "";
+  let msgEl = null;
+
+  if (State.settings.stream) {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop(); // keep incomplete last line
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") break;
+        try {
+          const chunk = JSON.parse(data);
+          const delta = chunk.choices?.[0]?.delta?.content || "";
+          fullContent += delta;
+          if (!msgEl) {
+            removeTypingIndicator(typingId);
+            msgEl = renderMessage("assistant", fullContent, null, true);
+          } else { updateStreamingMessage(msgEl, fullContent); }
+        } catch(e) { /* partial JSON, skip */ }
+      }
+    }
+  } else {
+    const data = await resp.json();
+    fullContent = data.choices?.[0]?.message?.content || "";
+  }
+
+  if (!msgEl) {
+    removeTypingIndicator(typingId);
+    renderMessage("assistant", fullContent || "(empty)");
+  }
+  State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
+  saveState();
+
+  if (State.settings.ttsEnabled && !parseFirstToolCall(fullContent)) speakText(fullContent);
+  scrollToBottom();
+  return fullContent;
+}
+
+// ── AGENTIC TOOL LOOP ──────────────────────────────────────────
+// Iterative (not recursive) loop: generate → parse tool calls →
+// execute → inject result as "tool" role → repeat until no tool call
+// or MAX_TOOL_ITERATIONS reached.
+
+async function runAgenticLoop(initialTypingId) {
+  let iterCount = 0;
+  let typingId = initialTypingId;
+  State._stopRequested = false;
+
+  while (iterCount < MAX_TOOL_ITERATIONS) {
+    if (State._stopRequested) {
+      addSystemMsg(State.language === "fr" ? "Génération arrêtée." : "Generation stopped.");
+      break;
+    }
+    iterCount++;
+
+    // Generate one LLM turn
+    const content = await generateOneTurn(typingId);
+    typingId = null; // only first turn uses the pre-created indicator
+
+    if (!content) break;
+
+    // Parse first tool call in the response
+    const toolCall = parseFirstToolCall(content);
+    if (!toolCall) break; // no tool call → final answer, done
+
+    // Execute the tool
+    const { tool, args } = toolCall;
+    logAction("tool", tool, JSON.stringify(args || {}));
+
+    let result;
+    try {
+      result = await dispatchTool(tool, args || {});
+    } catch(e) {
+      result = `Error: ${e.message}`;
+      logAction("error", tool, e.message);
+    }
+
+    // Render tool call/result in chat
+    const resultStr = typeof result === "string"
+      ? result.slice(0, 500)
+      : JSON.stringify(result).slice(0, 500);
+    renderMessage("tool",
+      `🔧 ${tool}(${JSON.stringify(args || {})}) →\n${resultStr}`);
+
+    // Inject tool result into message history as a "tool" role message
+    // (using "user" role for compatibility with models that don't support "tool")
+    State.messages.push({
+      role: "user",
+      content: `[Tool result: ${tool}]\n${resultStr}`,
+      timestamp: Date.now(),
+      _isTool: true,
+    });
+    saveState();
+  }
+
+  if (iterCount >= MAX_TOOL_ITERATIONS) {
+    addSystemMsg("⚠ Agentic loop: reached maximum iterations. Stopping.");
+    logAction("error", "tool_loop", "Max iterations reached");
+  }
+}
+
+function parseFirstToolCall(content) {
+  const regex = /```tool_call\s*([\s\S]*?)```/i;
+  const match = regex.exec(content);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1].trim());
+    if (parsed && parsed.tool) return parsed;
+  } catch(e) {
+    logAction("error", "tool_parse", `Invalid JSON in tool_call block: ${match[1].slice(0,100)}`);
+  }
+  return null;
+}
+
+/** Generate exactly one LLM turn; returns the content string */
+async function generateOneTurn(existingTypingId) {
+  const typingId = existingTypingId || addTypingIndicator();
+  let content = "";
+
+  try {
+    if (State.activeModelId && State.engine) {
+      content = await generateLocalTurn(typingId);
+    } else if (State.settings.activeCloudModelId) {
+      content = await generateCloudTurn(typingId);
+    } else {
+      removeTypingIndicator(typingId);
+    }
+  } catch(e) {
+    removeTypingIndicator(typingId);
+    addSystemMsg(`Turn error: ${e.message}`, "error");
+    console.error("Turn error:", e);
+  }
+
+  return content;
+}
+
+async function dispatchTool(name, args) {
+  switch(name) {
+    case "web_search":       return await toolWebSearch(args.query);
+    case "fetch_url":        return await toolFetchUrl(args.url);
+    case "set_language":     setLanguage(args.lang); return `Language set to ${args.lang}`;
+    case "set_model":        return await toolSetModel(args.id);
+    case "clear_context":    clearContext(); return "Context cleared";
+    case "remember":         memoryRemember(args.text); return `Remembered: ${args.text}`;
+    case "recall":           return memoryRecall(args.query).map(m => m.text).join("\n") || "No memories found";
+    case "calculate":        return toolCalculate(args.expr);
+    case "current_datetime": return toolCurrentDatetime();
+    default:                 return `Unknown tool: ${name}`;
+  }
+}
+
+// ── TOOL IMPLEMENTATIONS ──────────────────────────────────────
+
+/** web_search — Gemini grounding (primary) or PSE (fallback) */
+async function toolWebSearch(query, displayResult = false) {
+  logAction("search", "web_search", query);
+
+  if (State.settings.geminiSearchEnabled && State.settings.geminiKey) {
+    return await searchGeminiGrounding(query, displayResult);
+  } else if (State.settings.pseEnabled && State.settings.pseKey && State.settings.pseCx) {
+    return await searchPSE(query, displayResult);
+  } else {
+    const msg = State.language === "fr"
+      ? "Aucun fournisseur de recherche configuré. Activez Gemini Search ou PSE dans l'onglet Recherche."
+      : "No search provider configured. Enable Gemini Search or PSE in the Search tab.";
+    if (displayResult) addSystemMsg(msg);
+    return msg;
+  }
+}
+
+async function searchGeminiGrounding(query, displayResult) {
+  const key = State.settings.geminiKey;
+  const model = State.settings.geminiSearchModel || "gemini-2.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+  ledgerAdd("POST", url, `Gemini grounding: "${query}"`);
+
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: query }] }],
+        tools: [{ google_search: {} }],
+      })
+    });
+
+    ledgerUpdate(resp.ok ? "ok" : "err", resp.status);
+
+    if (!resp.ok) {
+      const e = await resp.text();
+      return `Search error ${resp.status}: ${e}`;
+    }
+
+    const data = await resp.json();
+    const textParts = data.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean) || [];
+    const text = textParts.join("\n");
+    const grounding = data.candidates?.[0]?.groundingMetadata;
+    const queries = grounding?.webSearchQueries || [];
+    const sources = grounding?.groundingChunks?.map(c => c.web).filter(Boolean) || [];
+
+    if (displayResult) {
+      const citations = sources.length
+        ? `\n\n**Sources:**\n${sources.map(s => `- [${s.title || s.uri}](${s.uri})`).join("\n")}`
+        : "";
+      renderMessage("assistant", (text || "(no answer)") + citations);
+      State.messages.push({ role: "assistant", content: text + citations, timestamp: Date.now() });
+      saveState();
+    }
+
+    return { text, sources, queries };
+  } catch(e) {
+    ledgerUpdate("err", 0);
+    return `Network error: ${e.message}`;
+  }
+}
+
+async function searchPSE(query, displayResult) {
+  const url = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(State.settings.pseKey)}&cx=${encodeURIComponent(State.settings.pseCx)}&q=${encodeURIComponent(query)}`;
+  ledgerAdd("GET", url.replace(/key=[^&]+/, "key=***"), `PSE search: "${query}"`);
+
+  try {
+    const resp = await fetch(url);
+    ledgerUpdate(resp.ok ? "ok" : "err", resp.status);
+    if (!resp.ok) return `PSE error ${resp.status}`;
+    const data = await resp.json();
+    const items = data.items?.slice(0, 5).map(i => `- [${i.title}](${i.link})\n  ${i.snippet}`) || [];
+    const result = items.join("\n");
+    if (displayResult && result) {
+      renderMessage("assistant", `**Search results for "${query}":**\n${result}`);
+      State.messages.push({ role: "assistant", content: result, timestamp: Date.now() });
+      saveState();
+    }
+    return result || "No results";
+  } catch(e) {
+    ledgerUpdate("err", 0);
+    return `Error: ${e.message}`;
+  }
+}
+
+async function toolFetchUrl(url) {
+  const targetUrl = State.settings.corsProxyEnabled
+    ? `${State.settings.corsProxyUrl}${encodeURIComponent(url)}`
+    : url;
+  ledgerAdd("GET", url, "fetch_url");
+
+  try {
+    const resp = await fetch(targetUrl, { signal: AbortSignal.timeout(10000) });
+    ledgerUpdate(resp.ok ? "ok" : "err", resp.status);
+    if (!resp.ok) return `HTTP ${resp.status}`;
+
+    const contentType = resp.headers.get("content-type") || "";
+    if (!contentType.includes("text") && !contentType.includes("html") && !contentType.includes("json")) {
+      return `Non-text content (${contentType}) — not extracting`;
+    }
+
+    const html = await resp.text();
+    // Parse with DOMParser (inert document — no scripts execute, no resources load)
+    const doc = (new DOMParser()).parseFromString(html, "text/html");
+    doc.querySelectorAll("script,style,nav,footer,header,noscript").forEach(el => el.remove());
+    const text = (doc.body?.textContent || doc.documentElement.textContent || "")
+      .replace(/\s+/g, " ").trim().slice(0, 3000);
+    return text || "(empty page)";
+  } catch(e) {
+    ledgerUpdate("err", 0);
+    if (!State.settings.corsProxyEnabled) {
+      return `CORS or network error: ${e.message}. Try enabling CORS proxy in Search tab.`;
+    }
+    return `Error: ${e.message}`;
+  }
+}
+
+async function toolSetModel(id) {
+  const local = State.availableLocalModels.find(m => m.toLowerCase().includes(id.toLowerCase()));
+  if (local) { await loadLocalModel(local); return `Model set to ${local}`; }
+  const cloud = State.settings.cloudModels.find(m => m.id.includes(id) || m.model.includes(id));
+  if (cloud) { setActiveCloudModel(cloud.id); return `Cloud model set to ${cloud.label}`; }
+  return `Model not found: ${id}`;
+}
+
+/**
+ * Safe math evaluator — NO eval, NO Function constructor.
+ * Implements a recursive descent parser for:
+ * numbers, +, -, *, /, ^, %, parentheses, and
+ * Math functions: abs, sqrt, floor, ceil, round, sin, cos, tan, log, log2, log10, exp, pi, e
+ */
+function toolCalculate(expr) {
+  try {
+    const tokens = tokenizeMath(expr.trim());
+    const result = parseMathExpr(tokens, { pos: 0 });
+    if (typeof result !== "number" || !isFinite(result)) return "Result is not finite";
+    return String(result);
+  } catch(e) {
+    return `Calculation error: ${e.message}`;
+  }
+}
+
+function tokenizeMath(expr) {
+  const tokens = [];
+  let i = 0;
+  while (i < expr.length) {
+    if (/\s/.test(expr[i])) { i++; continue; }
+    if (/[0-9.]/.test(expr[i])) {
+      let num = "";
+      while (i < expr.length && /[0-9.eE+\-]/.test(expr[i])) {
+        // handle scientific notation sign only after e/E
+        if ((expr[i] === "+" || expr[i] === "-") && !/[eE]/.test(expr[i-1])) break;
+        num += expr[i++];
+      }
+      tokens.push({ type: "num", val: parseFloat(num) });
+    } else if (/[a-zA-Z_]/.test(expr[i])) {
+      let name = "";
+      while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) name += expr[i++];
+      tokens.push({ type: "id", val: name.toLowerCase() });
+    } else if ("+-*/^%()".includes(expr[i])) {
+      tokens.push({ type: "op", val: expr[i++] });
+    } else { i++; } // skip unknown chars
+  }
+  tokens.push({ type: "eof" });
+  return tokens;
+}
+
+const MATH_CONSTS = { pi: Math.PI, e: Math.E };
+const MATH_FUNS = {
+  abs: Math.abs, sqrt: Math.sqrt, floor: Math.floor, ceil: Math.ceil,
+  round: Math.round, sin: Math.sin, cos: Math.cos, tan: Math.tan,
+  asin: Math.asin, acos: Math.acos, atan: Math.atan, atan2: Math.atan2,
+  log: Math.log, log2: Math.log2, log10: Math.log10, exp: Math.exp,
+  pow: Math.pow, min: Math.min, max: Math.max, sign: Math.sign,
+};
+
+function parseMathExpr(tokens, state) { return parseAddSub(tokens, state); }
+
+function parseAddSub(tokens, state) {
+  let left = parseMulDiv(tokens, state);
+  while (state.pos < tokens.length) {
+    const t = tokens[state.pos];
+    if (t.type === "op" && (t.val === "+" || t.val === "-")) {
+      state.pos++;
+      const right = parseMulDiv(tokens, state);
+      left = t.val === "+" ? left + right : left - right;
+    } else break;
+  }
+  return left;
+}
+
+function parseMulDiv(tokens, state) {
+  let left = parsePow(tokens, state);
+  while (state.pos < tokens.length) {
+    const t = tokens[state.pos];
+    if (t.type === "op" && (t.val === "*" || t.val === "/" || t.val === "%")) {
+      state.pos++;
+      const right = parsePow(tokens, state);
+      if (t.val === "*") left *= right;
+      else if (t.val === "/") left /= right;
+      else left %= right;
+    } else break;
+  }
+  return left;
+}
+
+function parsePow(tokens, state) {
+  let base = parseUnary(tokens, state);
+  if (state.pos < tokens.length && tokens[state.pos].type === "op" && tokens[state.pos].val === "^") {
+    state.pos++;
+    const exp = parsePow(tokens, state); // right-associative
+    base = Math.pow(base, exp);
+  }
+  return base;
+}
+
+function parseUnary(tokens, state) {
+  const t = tokens[state.pos];
+  if (t.type === "op" && t.val === "-") { state.pos++; return -parseUnary(tokens, state); }
+  if (t.type === "op" && t.val === "+") { state.pos++; return parseUnary(tokens, state); }
+  return parseAtom(tokens, state);
+}
+
+function parseAtom(tokens, state) {
+  const t = tokens[state.pos];
+  if (t.type === "num") { state.pos++; return t.val; }
+  if (t.type === "id") {
+    state.pos++;
+    if (t.val in MATH_CONSTS) return MATH_CONSTS[t.val];
+    if (t.val in MATH_FUNS) {
+      if (tokens[state.pos]?.val !== "(") throw new Error(`Expected ( after ${t.val}`);
+      state.pos++; // consume (
+      const args = [];
+      while (tokens[state.pos]?.val !== ")") {
+        if (tokens[state.pos]?.type === "eof") throw new Error("Unclosed (");
+        args.push(parseMathExpr(tokens, state));
+        if (tokens[state.pos]?.val === ",") state.pos++;
+      }
+      state.pos++; // consume )
+      return MATH_FUNS[t.val](...args);
+    }
+    throw new Error(`Unknown identifier: ${t.val}`);
+  }
+  if (t.type === "op" && t.val === "(") {
+    state.pos++;
+    const val = parseMathExpr(tokens, state);
+    if (tokens[state.pos]?.val !== ")") throw new Error("Missing closing )");
+    state.pos++;
+    return val;
+  }
+  if (t.type === "eof") throw new Error("Unexpected end of expression");
+  throw new Error(`Unexpected token: ${t.val}`);
+}
+
+function toolCurrentDatetime() {
+  const now = new Date();
+  const opts = { weekday: "long", year: "numeric", month: "long", day: "numeric",
+                 hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" };
+  return now.toLocaleString(State.language === "fr" ? "fr-FR" : "en-US", opts);
+}
+
+// ── MEMORY STORE ──────────────────────────────────────────────
+// Minimal flat-list implementation.
+// ROADMAP: tree memory — replace with topic-tree where memories are
+// clustered by topic node; each node has parent ref, children[], and
+// embedding for semantic similarity search. The remember/recall API
+// below is intentionally minimal so that upgrade is non-breaking.
+
+function memoryRemember(text) {
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+  State.memory.push({ id, text, timestamp: Date.now() });
+  saveState();
+  renderMemoryList();
+  logAction("info", "remember", text.slice(0, 60));
+}
+
+function memoryRecall(query) {
+  if (!query) return State.memory.slice(-10);
+  const q = query.toLowerCase();
+  return State.memory.filter(m => m.text.toLowerCase().includes(q)).slice(-10);
+}
+
+function renderMemoryList() {
+  const container = document.getElementById("memory-list");
+  container.innerHTML = "";
+  if (State.memory.length === 0) {
+    container.innerHTML = '<div class="text-sm text-muted">No memories yet.</div>';
+    return;
+  }
+  for (const m of State.memory.slice().reverse().slice(0, 50)) {
+    const el = document.createElement("div");
+    el.className = "memory-item";
+    el.innerHTML = `
+      <span class="memory-item-text">${escHtml(m.text)}</span>
+      <span class="memory-item-time">${new Date(m.timestamp).toLocaleDateString()}</span>
+      <button class="btn btn-secondary btn-sm" style="padding:2px 6px;font-size:10px" data-id="${m.id}">×</button>
+    `;
+    el.querySelector("button").addEventListener("click", () => {
+      State.memory = State.memory.filter(x => x.id !== m.id);
+      saveState(); renderMemoryList();
+    });
+    container.appendChild(el);
+  }
+}
+
+// ── RENDER HELPERS ────────────────────────────────────────────
+function renderMessage(role, content, meta, streaming = false) {
+  const container = document.getElementById("messages");
+  const wrapper = document.createElement("div");
+  wrapper.className = `msg ${role}`;
+
+  const bubble = document.createElement("div");
+  bubble.className = "msg-bubble";
+
+  if (role === "assistant") {
+    bubble.innerHTML = renderMarkdown(content);
+  } else if (role === "tool") {
+    bubble.textContent = content;
+  } else {
+    bubble.textContent = content;
+  }
+
+  wrapper.appendChild(bubble);
+
+  if (meta) {
+    const metaEl = document.createElement("div");
+    metaEl.className = "msg-meta";
+    metaEl.textContent = meta;
+    wrapper.appendChild(metaEl);
+  }
+
+  if (role === "user") {
+    const metaEl = document.createElement("div");
+    metaEl.className = "msg-meta";
+    metaEl.textContent = new Date().toLocaleTimeString();
+    wrapper.appendChild(metaEl);
+  }
+
+  container.appendChild(wrapper);
+  if (!streaming) scrollToBottom();
+  return wrapper;
+}
+
+function updateStreamingMessage(el, content) {
+  const bubble = el.querySelector(".msg-bubble");
+  if (bubble) bubble.innerHTML = renderMarkdown(content);
+  scrollToBottom();
+}
+
+function renderMarkdown(content) {
+  try {
+    const html = marked.parse(content);
+    return DOMPurify.sanitize(html);
+  } catch(e) {
+    return escHtml(content).replace(/\n/g, "<br>");
+  }
+}
+
+function addSystemMsg(text, type = "info") {
+  const container = document.getElementById("messages");
+  const wrapper = document.createElement("div");
+  wrapper.className = "msg system";
+  const bubble = document.createElement("div");
+  bubble.className = "msg-bubble";
+  // Apply border color based on type
+  const colors = { error: "var(--red)", warn: "var(--yellow)", success: "var(--green)", info: "var(--border)" };
+  bubble.style.borderLeftColor = colors[type] || "var(--border)";
+  bubble.style.borderLeftWidth = "3px";
+  // System messages may contain markdown
+  bubble.innerHTML = renderMarkdown(text);
+  wrapper.appendChild(bubble);
+  container.appendChild(wrapper);
+  scrollToBottom();
+}
+
+function addTypingIndicator() {
+  const id = "typing-" + Date.now();
+  const container = document.getElementById("messages");
+  const wrapper = document.createElement("div");
+  wrapper.className = "msg assistant";
+  wrapper.id = id;
+  const bubble = document.createElement("div");
+  bubble.className = "msg-bubble";
+  bubble.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+  wrapper.appendChild(bubble);
+  container.appendChild(wrapper);
+  scrollToBottom();
+  return id;
+}
+
+function removeTypingIndicator(id) {
+  document.getElementById(id)?.remove();
+}
+
+function scrollToBottom() {
+  const msgs = document.getElementById("messages");
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ── LEDGER & ACTIONS ──────────────────────────────────────────
+let _lastLedgerEntry = null;
+
+function ledgerAdd(method, url, detail) {
+  const entry = { method, url, detail, time: new Date().toLocaleTimeString(), status: null };
+  State.ledger.unshift(entry);
+  _lastLedgerEntry = entry;
+  renderLedger();
+}
+
+function ledgerUpdate(status, code) {
+  if (_lastLedgerEntry) {
+    _lastLedgerEntry.status = status;
+    _lastLedgerEntry.code = code;
+    renderLedger();
+  }
+}
+
+function renderLedger() {
+  const container = document.getElementById("ledger-log");
+  if (State.ledger.length === 0) {
+    container.innerHTML = '<div class="text-sm text-muted">No network calls yet.</div>';
+    return;
+  }
+  container.innerHTML = "";
+  for (const e of State.ledger.slice(0, 50)) {
+    const el = document.createElement("div");
+    el.className = "ledger-entry";
+    el.innerHTML = `
+      <div class="ledger-entry-header">
+        <span class="ledger-method ${e.method}">${e.method}</span>
+        <span class="ledger-url">${escHtml(e.url.length > 60 ? e.url.slice(0,60)+"…" : e.url)}</span>
+        <span class="ledger-time">${e.time}</span>
+        ${e.status ? `<span class="ledger-status ${e.status}">${e.status === "ok" ? "✓" : "✗"} ${e.code||""}</span>` : ""}
+      </div>
+      <div class="ledger-detail">${escHtml(e.detail || "")}</div>
+    `;
+    container.appendChild(el);
+  }
+}
+
+function logAction(type, name, detail) {
+  const entry = { type, name, detail, time: new Date().toLocaleTimeString() };
+  State.actions.unshift(entry);
+  renderActions();
+}
+
+function renderActions() {
+  const container = document.getElementById("actions-log");
+  if (State.actions.length === 0) {
+    container.innerHTML = '<div class="text-sm text-muted">No actions yet.</div>';
+    return;
+  }
+  container.innerHTML = "";
+  for (const a of State.actions.slice(0, 100)) {
+    const el = document.createElement("div");
+    el.className = `action-entry ${a.type}`;
+    el.innerHTML = `
+      <div class="flex items-center justify-between">
+        <span class="action-name">${escHtml(a.name)}</span>
+        <span class="action-time">${a.time}</span>
+      </div>
+      <div class="text-sm text-muted">${escHtml((a.detail||"").slice(0,120))}</div>
+    `;
+    container.appendChild(el);
+  }
+}
+
+// ── VOICE INPUT (Whisper ASR) ──────────────────────────────────
+function initVoice() {
+  const btn = document.getElementById("btn-voice");
+  btn.addEventListener("mousedown", startRecording);
+  btn.addEventListener("touchstart", (e) => { e.preventDefault(); startRecording(); });
+  btn.addEventListener("mouseup", stopRecording);
+  btn.addEventListener("touchend", stopRecording);
+  btn.addEventListener("mouseleave", stopRecording);
+
+  renderVoiceTab();
+  initTTS();
+}
+
+function renderVoiceTab() {
+  const voiceEnabled = State.settings.voiceEnabled && State.micAvailable;
+  document.getElementById("btn-voice").style.display = voiceEnabled ? "flex" : "none";
+  document.getElementById("voice-asr-status").textContent = State.asrLoaded
+    ? `ASR ready: ${State.settings.asrModel}`
+    : State.asrLoading ? "Loading ASR model…" : "ASR not loaded";
+}
+
+async function startRecording() {
+  if (!State.settings.voiceEnabled || !State.micAvailable) return;
+  if (State.isRecording) return;
+
+  // Lazy-load ASR pipeline
+  if (!State.asrLoaded && !State.asrLoading) {
+    await loadASR();
+  }
+  if (!State.asrLoaded) return;
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    State.audioChunks = [];
+    State.mediaRecorder = new MediaRecorder(stream, { mimeType: getSupportedMimeType() });
+    State.mediaRecorder.ondataavailable = e => { if (e.data.size > 0) State.audioChunks.push(e.data); };
+    State.mediaRecorder.start(100);
+    State.isRecording = true;
+    document.getElementById("btn-voice").classList.add("active");
+    updateMicPill("recording");
+    logAction("info", "voice", "Recording started");
+  } catch(e) {
+    addSystemMsg(`Mic error: ${e.message}`, "error");
+    logAction("error", "voice", e.message);
+  }
+}
+
+async function stopRecording() {
+  if (!State.isRecording) return;
+  State.isRecording = false;
+  document.getElementById("btn-voice").classList.remove("active");
+  updateMicPill("idle");
+
+  return new Promise(resolve => {
+    State.mediaRecorder.onstop = async () => {
+      const blob = new Blob(State.audioChunks, { type: getSupportedMimeType() });
+      State.mediaRecorder.stream.getTracks().forEach(t => t.stop());
+      await transcribeBlob(blob);
+      resolve();
+    };
+    State.mediaRecorder.stop();
+  });
+}
+
+function getSupportedMimeType() {
+  const types = ["audio/webm;codecs=opus","audio/webm","audio/ogg;codecs=opus","audio/ogg","audio/mp4"];
+  return types.find(t => MediaRecorder.isTypeSupported(t)) || "";
+}
+
+async function transcribeBlob(blob) {
+  if (!State.asrPipeline) return;
+
+  const statusEl = document.getElementById("voice-asr-status");
+  statusEl.textContent = "Transcribing…";
+  logAction("info", "asr", "Transcribing audio…");
+
+  try {
+    // Decode audio
+    const arrayBuf = await blob.arrayBuffer();
+    const audioCtx = new AudioContext();
+    const decoded = await audioCtx.decodeAudioData(arrayBuf);
+    await audioCtx.close();
+
+    // Resample to 16kHz mono Float32
+    const targetSR = 16000;
+    const numFrames = Math.floor(decoded.duration * targetSR);
+    const offlineCtx = new OfflineAudioContext(1, numFrames, targetSR);
+    const src = offlineCtx.createBufferSource();
+    src.buffer = decoded;
+    src.connect(offlineCtx.destination);
+    src.start();
+    const resampled = await offlineCtx.startRendering();
+    const float32 = resampled.getChannelData(0);
+
+    // Transcribe
+    const result = await State.asrPipeline(float32, {
+      language: State.language === "fr" ? "french" : "english",
+      task: "transcribe",
+      chunk_length_s: 30,
+      stride_length_s: 5,
+    });
+
+    const transcript = result?.text?.trim() || "";
+    statusEl.textContent = transcript ? `Transcribed: "${transcript.slice(0,40)}…"` : "No speech detected";
+    logAction("info", "asr", `Transcript: ${transcript.slice(0,80)}`);
+
+    if (transcript) {
+      const input = document.getElementById("chat-input");
+      input.value = transcript;
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 160) + "px";
+      updateSendButton();
+      if (State.settings.voiceAutoSubmit) sendMessage(transcript);
+    }
+  } catch(e) {
+    statusEl.textContent = `ASR error: ${e.message}`;
+    logAction("error", "asr", e.message);
+    console.error("ASR error:", e);
+  }
+}
+
+async function loadASR() {
+  if (State.asrLoading || State.asrLoaded) return;
+  State.asrLoading = true;
+
+  const progressEl = document.getElementById("voice-progress");
+  const progressBar = document.getElementById("voice-progress-bar");
+  const progressText = document.getElementById("voice-progress-text");
+  progressEl.style.display = "block";
+  progressText.textContent = "Loading Whisper…";
+
+  logAction("info", "asr_load", `Loading ${State.settings.asrModel}`);
+  addSystemMsg(State.language === "fr"
+    ? `Chargement du modèle ASR (${State.settings.asrModel})…`
+    : `Loading ASR model (${State.settings.asrModel})…`);
+
+  try {
+    // Dynamic import of transformers.js
+    const { pipeline } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.0");
+
+    // Try WebGPU first, fall back to wasm
+    const progressCb = (p) => {
+      if (p.status === "progress" && p.total > 0) {
+        const pct = Math.round((p.loaded / p.total) * 100);
+        progressBar.style.width = pct + "%";
+        progressText.textContent = `Downloading… ${pct}%`;
+      } else if (p.status === "ready") {
+        progressBar.style.width = "100%";
+        progressText.textContent = "Ready";
+      }
+    };
+
+    let device = State.webgpuAvailable ? "webgpu" : "wasm";
+    try {
+      if (device === "webgpu") progressText.textContent = "Loading on WebGPU…";
+      State.asrPipeline = await pipeline(
+        "automatic-speech-recognition",
+        State.settings.asrModel,
+        { device, dtype: "q8", progress_callback: progressCb }
+      );
+    } catch(e) {
+      // WebGPU failed — retry with WASM
+      device = "wasm";
+      progressText.textContent = "WebGPU failed, retrying on WASM…";
+      State.asrPipeline = await pipeline(
+        "automatic-speech-recognition",
+        State.settings.asrModel,
+        { device: "wasm", dtype: "fp32", progress_callback: progressCb }
+      );
+    }
+
+    State.asrLoaded = true;
+    State.asrLoading = false;
+    progressText.textContent = "ASR ready";
+    setTimeout(() => { progressEl.style.display = "none"; }, 2000);
+    renderVoiceTab();
+    logAction("info", "asr_load", `ASR ready on ${device}`);
+    addSystemMsg(State.language === "fr" ? "ASR prêt !" : "ASR model ready!");
+
+  } catch(e) {
+    State.asrLoading = false;
+    State.asrLoaded = false;
+    progressText.textContent = `Failed: ${e.message}`;
+    logAction("error", "asr_load", e.message);
+    addSystemMsg(`ASR load failed: ${e.message}`, "error");
+    console.error("ASR load error:", e);
+  }
+}
+
+// ── TTS ───────────────────────────────────────────────────────
+function initTTS() {
+  if (!("speechSynthesis" in window)) return;
+
+  const select = document.getElementById("tts-voice-select");
+  const loadVoices = () => {
+    const voices = speechSynthesis.getVoices();
+    if (voices.length === 0) return;
+    select.innerHTML = "";
+    for (const v of voices) {
+      const opt = document.createElement("option");
+      opt.value = v.name;
+      opt.textContent = `${v.name} (${v.lang})`;
+      if (v.name === State.settings.ttsVoiceName) opt.selected = true;
+      select.appendChild(opt);
+    }
+  };
+  loadVoices();
+  speechSynthesis.addEventListener("voiceschanged", loadVoices);
+
+  select.addEventListener("change", () => {
+    State.settings.ttsVoiceName = select.value;
+    saveState();
+  });
+}
+
+function speakText(text) {
+  if (!State.settings.ttsEnabled || !("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+
+  // Strip markdown for TTS
+  const plain = text.replace(/[#*`_~\[\]()]/g, "").replace(/\n+/g, " ").trim().slice(0, 1000);
+  const utt = new SpeechSynthesisUtterance(plain);
+  utt.lang = State.language === "fr" ? "fr-FR" : "en-US";
+
+  const voiceName = State.settings.ttsVoiceName;
+  if (voiceName) {
+    const voice = speechSynthesis.getVoices().find(v => v.name === voiceName);
+    if (voice) utt.voice = voice;
+  }
+
+  utt.onstart = () => { State.isSpeaking = true; };
+  utt.onend = () => { State.isSpeaking = false; };
+  utt.onerror = () => { State.isSpeaking = false; };
+  speechSynthesis.speak(utt);
+  State.ttsUtterance = utt;
+}
+
+// ── CONTEXT MANAGEMENT ────────────────────────────────────────
+function clearContext() {
+  State.messages = [];
+  document.getElementById("messages").innerHTML = "";
+  document.getElementById("token-counter").style.display = "none";
+  saveState();
+  addSystemMsg(State.language === "fr" ? "Contexte effacé." : "Context cleared.");
+  logAction("info", "clear_context", "Conversation context cleared");
+}
+
+// ── EXPORT / IMPORT ───────────────────────────────────────────
+function exportData() {
+  const data = {
+    version: VERSION,
+    exported: new Date().toISOString(),
+    settings: { ...State.settings, geminiKey: "", pseKey: "", openaiKey: "" }, // strip secrets
+    memory: State.memory,
+    messages: State.messages,
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `hermes-export-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  logAction("info", "export", "Data exported");
+}
+
+function importData(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      if (data.settings) Object.assign(State.settings, data.settings);
+      if (data.memory) State.memory = data.memory;
+      if (data.messages) {
+        State.messages = data.messages;
+        // Re-render chat
+        document.getElementById("messages").innerHTML = "";
+        for (const m of State.messages) renderMessage(m.role, m.content, m.meta, false);
+      }
+      saveState();
+      renderMemoryList();
+      bindSettings(); // re-sync UI
+      addSystemMsg("Data imported successfully.");
+      logAction("info", "import", `Imported from ${file.name}`);
+    } catch(err) {
+      addSystemMsg(`Import failed: ${err.message}`, "error");
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = "";
+}
+
+function clearAll() {
+  if (!confirm("Clear ALL data including memories and settings? This cannot be undone.")) return;
+  localStorage.removeItem(LS_KEY);
+  location.reload();
+}
+
+// ── INIT ──────────────────────────────────────────────────────
+async function init() {
+  // 1. Load persisted state
+  loadState();
+
+  // 2. Restore language
+  if (State.settings.language) State.language = State.settings.language;
+
+  // 3. Wire up panel tabs
+  initTabs();
+
+  // 4. Bind settings UI to state
+  bindSettings();
+
+  // 5. Detect capabilities (WebGPU, mic)
+  await detectCapabilities();
+
+  // 6. Init model manager
+  initModelManager();
+
+  // 7. Init chat
+  initChat();
+
+  // 8. Init voice
+  initVoice();
+
+  // 9. Init memory UI
+  renderMemoryList();
+
+  // 10. Init ledger/actions UI
+  renderLedger();
+  renderActions();
+
+  // 11. Update send button
+  updateSendButton();
+
+  // 12. Apply language
+  setLanguage(State.language);
+
+  console.info(`Hermes ${VERSION} initialized. WebGPU: ${State.webgpuAvailable}, Models available: ${State.availableLocalModels.length}`);
+}
+
+// Catch any unhandled errors — never blank-screen
+window.addEventListener("unhandledrejection", e => {
+  console.error("Unhandled promise rejection:", e.reason);
+  logAction("error", "uncaught", String(e.reason?.message || e.reason).slice(0, 200));
+  e.preventDefault(); // prevent default browser error
+});
+window.addEventListener("error", e => {
+  console.error("Uncaught error:", e.error);
+  logAction("error", "uncaught", String(e.message).slice(0, 200));
+});
+
+// Boot
+init().catch(err => {
+  console.error("Fatal init error:", err);
+  document.body.innerHTML = `<div style="color:#f87171;padding:40px;font-family:monospace">
+    <h2>Hermes failed to initialize</h2>
+    <p>${escHtml(String(err))}</p>
+    <p>Check browser console for details. Requires a modern browser (Chrome 113+).</p>
+  </div>`;
+});
+</script>
+</body>
+</html>
