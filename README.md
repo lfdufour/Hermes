@@ -1,5 +1,7 @@
 # Hermes
 
+**[Try it live on GitHub Pages →](https://lfdufour.github.io/Hermes/)**
+
 A personal AI assistant that runs entirely in your browser from a single HTML file. **Offline processing** means all speech-to-text, language model reasoning, and orchestration happen locally on your machine via WebGPU and WebAssembly — nothing about your prompts or conversations leaves your device unless you explicitly request it. **Online** capabilities let you perform web searches and optionally call cloud models when you choose, with every network request shown transparently in the Network ledger.
 
 ## Features
