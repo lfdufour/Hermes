@@ -197,6 +197,8 @@
     .btn-icon:hover { background: var(--bg4); }
     .btn-icon.active { background: var(--red); color: var(--on-accent); border-color: var(--red); animation: pulse 1.5s infinite; }
     @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(152,35,26,0.4)} 50%{box-shadow:0 0 0 6px rgba(152,35,26,0)} }
+    #btn-think.active { background: var(--accent); color: #f5f9f7; border-color: var(--accent); }
+    #btn-think:disabled { opacity: 0.35; cursor: not-allowed; }
 
     /* Send button — up-arrow when idle, stop-square (with spinner) while generating */
     .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
@@ -468,6 +470,7 @@
       <div id="input-bar">
         <div id="input-row">
           <button id="btn-voice" class="btn-icon" title="Push to talk (hold)" style="display:none">🎤</button>
+          <button id="btn-think" class="btn-icon" title="Thinking mode (Qwen3 only)" aria-pressed="false" disabled>💭</button>
           <textarea id="chat-input" rows="1" placeholder="Message Hermes… (Enter to send, Shift+Enter for newline)"></textarea>
           <button id="btn-stop" class="btn btn-danger" style="display:none" title="Stop generation">■ Stop</button>
           <button id="btn-send" class="btn btn-primary btn-send" title="Send" aria-label="Send" disabled>
@@ -484,7 +487,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b15 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b16 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -844,6 +847,7 @@ const State = {
     stream: true,
     includeUsage: true,
     debugMode: false,
+    thinkingEnabled: false,
     geminiKey: "",
     geminiSearchModel: "gemini-2.5-flash",
     geminiSearchEnabled: false,
@@ -1420,6 +1424,13 @@ function initChat() {
 
   document.getElementById("btn-stop").addEventListener("click", requestStop);
 
+  document.getElementById("btn-think").addEventListener("click", () => {
+    if (!activeModelSupportsThinking()) return;
+    State.settings.thinkingEnabled = !State.settings.thinkingEnabled;
+    saveState();
+    updateThinkingToggle();
+  });
+
   // Restore conversation
   for (const msg of State.messages) {
     renderMessage(msg.role, msg.content, msg.meta, false);
@@ -1429,6 +1440,7 @@ function initChat() {
       ? "Bonjour ! Chargez un modèle pour commencer à discuter."
       : "Welcome to Hermes! Load a model from the Models panel to start chatting.");
   }
+  updateThinkingToggle();
 }
 
 function requestStop() {
@@ -1475,6 +1487,20 @@ function updateSendButton() {
       : State.settings.cloudModels.find(m => m.id === State.settings.activeCloudModelId)?.label || "";
     statusEl.textContent = State.language === "fr" ? `Modèle actif : ${modelLabel}` : `Active model: ${modelLabel}`;
   }
+  updateThinkingToggle();
+}
+
+function updateThinkingToggle() {
+  const btn = document.getElementById("btn-think");
+  if (!btn) return;
+  const supported = activeModelSupportsThinking();
+  const on = supported && State.settings.thinkingEnabled;
+  btn.disabled = !supported;
+  btn.classList.toggle("active", on);
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.title = !supported
+    ? "Thinking mode — only Qwen3 models support it"
+    : (on ? "Thinking mode: ON — tap to turn off" : "Thinking mode: OFF — tap to turn on");
 }
 
 async function sendMessage(userText) {
@@ -1726,6 +1752,15 @@ async function maybeAutoSearch(userText) {
   return capped;
 }
 
+// Native thinking is a Qwen3-family feature (the only such models in the catalog).
+function modelSupportsThinking(modelId) {
+  return !!modelId && /qwen3/i.test(modelId);
+}
+function activeModelSupportsThinking() {
+  // Only a locally-loaded Qwen3 model; cloud models aren't controlled this way.
+  return !State.settings.activeCloudModelId && modelSupportsThinking(State.activeModelId);
+}
+
 function buildMessages() {
   const msgs = [];
 
@@ -1741,6 +1776,15 @@ function buildMessages() {
       msgs.push({ role: m.role, content: m.content });
     }
   }
+
+  // Qwen3 thinking control: append the soft switch to the latest user turn.
+  if (activeModelSupportsThinking()) {
+    const sw = State.settings.thinkingEnabled ? " /think" : " /no_think";
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "user") { msgs[i] = { ...msgs[i], content: msgs[i].content + sw }; break; }
+    }
+  }
+
   return msgs;
 }
 
@@ -1845,6 +1889,8 @@ async function generateLocalTurn(typingId) {
   State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
   saveState();
   renderDebug("raw model output", fullContent || "(empty)");
+  const _think = (fullContent.match(/<think>([\s\S]*?)<\/think>/i) || [])[1];
+  if (_think && _think.trim()) renderDebug("💭 thinking", _think.trim());
 
   // TTS only if this is a final answer (no tool call)
   if (s.ttsEnabled && fullContent && !parseFirstToolCall(fullContent)) speakText(displayText(fullContent));
@@ -1915,6 +1961,8 @@ async function generateGeminiTurn(cm, messages, typingId) {
   const data = await resp.json();
   const content = data.candidates?.[0]?.content?.parts?.map(p => p.text).join("") || "(no response)";
   renderDebug("raw model output", content);
+  const _thinkG = (content.match(/<think>([\s\S]*?)<\/think>/i) || [])[1];
+  if (_thinkG && _thinkG.trim()) renderDebug("💭 thinking", _thinkG.trim());
 
   removeTypingIndicator(typingId);
   const shownG = displayText(content);
@@ -1995,6 +2043,8 @@ async function generateOpenAITurn(cm, messages, typingId) {
     else if (!parseFirstToolCall(fullContent)) renderMessage("assistant", "(empty)");
   }
   renderDebug("raw model output", fullContent || "(empty)");
+  const _thinkOf = (fullContent.match(/<think>([\s\S]*?)<\/think>/i) || [])[1];
+  if (_thinkOf && _thinkOf.trim()) renderDebug("💭 thinking", _thinkOf.trim());
   State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
   saveState();
 
@@ -2087,8 +2137,10 @@ function parseFirstToolCall(content) {
 function displayText(s) {
   if (!s) return "";
   return s
-    .replace(/```tool_call[\s\S]*?```/gi, "")   // complete tool-call blocks
-    .replace(/```tool_call[\s\S]*$/i, "")        // partial block still streaming
+    .replace(/```tool_call[\s\S]*?```/gi, "")
+    .replace(/```tool_call[\s\S]*$/i, "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/i, "")
     .trim();
 }
 
