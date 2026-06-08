@@ -487,7 +487,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b18 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b19 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -1890,13 +1890,13 @@ async function generateLocalTurn(typingId) {
     fullContent = resp.choices[0]?.message?.content || "";
     usageInfo = resp.usage;
     removeTypingIndicator(typingId);
-    const shownFinal = displayText(fullContent);
+    const shownFinal = displayText(fullContent) || thinkFallback(fullContent);
     if (shownFinal) msgEl = renderMessage("assistant", shownFinal);
   }
 
   if (!msgEl) {
     removeTypingIndicator(typingId);
-    const shownFb = displayText(fullContent);
+    const shownFb = displayText(fullContent) || thinkFallback(fullContent);
     if (shownFb) msgEl = renderMessage("assistant", shownFb);
     else if (!parseFirstToolCall(fullContent)) msgEl = renderMessage("assistant", "(empty response)");
   }
@@ -1988,7 +1988,7 @@ async function generateGeminiTurn(cm, messages, typingId) {
   if (_thinkG && _thinkG.trim()) renderDebug("💭 thinking", _thinkG.trim());
 
   removeTypingIndicator(typingId);
-  const shownG = displayText(content);
+  const shownG = displayText(content) || thinkFallback(content);
   if (shownG) renderMessage("assistant", shownG);
   State.messages.push({ role: "assistant", content, timestamp: Date.now() });
   saveState();
@@ -2061,7 +2061,7 @@ async function generateOpenAITurn(cm, messages, typingId) {
 
   if (!msgEl) {
     removeTypingIndicator(typingId);
-    const shownOf = displayText(fullContent);
+    const shownOf = displayText(fullContent) || thinkFallback(fullContent);
     if (shownOf) renderMessage("assistant", shownOf);
     else if (!parseFirstToolCall(fullContent)) renderMessage("assistant", "(empty)");
   }
@@ -2102,6 +2102,16 @@ async function runAgenticLoop(initialTypingId) {
     // Parse first tool call in the response
     const toolCall = parseFirstToolCall(content);
     if (!toolCall) break;   // no tool call → final answer
+
+    // Strip <think> hallucinations from the stored assistant turn so the next
+    // generation sees only the tool_call block without simulated fake results.
+    for (let i = State.messages.length - 1; i >= 0; i--) {
+      if (State.messages[i].role === "assistant") {
+        const block = (content.match(/```tool_call[\s\S]*?```/i) || [content])[0];
+        State.messages[i] = { ...State.messages[i], content: block };
+        break;
+      }
+    }
 
     // Execute the tool
     const { tool, args } = toolCall;
@@ -2165,6 +2175,15 @@ function displayText(s) {
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/<think>[\s\S]*$/i, "")
     .trim();
+}
+
+// When displayText() returns empty and the turn is not a tool call, surface
+// the <think> block content as a last-resort answer. Qwen3-0.6B sometimes
+// puts its final answer inside <think> with no text after </think>.
+function thinkFallback(content) {
+  if (parseFirstToolCall(content)) return "";   // tool-call turn — no visible text by design
+  const m = /<think>([\s\S]*?)(?:<\/think>|$)/i.exec(content);
+  return m ? m[1].trim() : "";
 }
 
 /** Generate exactly one LLM turn; returns the content string */
