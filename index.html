@@ -472,7 +472,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b8 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b9 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -1561,8 +1561,9 @@ async function generateResponse(userText) {
   // Proactive grounding: small local models seldom emit tool calls on their
   // own, so for clearly time-sensitive questions (weather, news, prices…)
   // we fetch fresh web results up front and feed them into context.
+  let grounded = "";
   if (isTopLevel) {
-    try { await maybeAutoSearch(userText); }
+    try { grounded = (await maybeAutoSearch(userText)) || ""; }
     catch(e) { console.error("auto-search:", e); }
   }
 
@@ -1570,6 +1571,26 @@ async function generateResponse(userText) {
 
   try {
     await runAgenticLoop(typingId);
+
+    // Two-tier safety net: capable models answer from the grounded data above.
+    // Tiny models (e.g. SmolLM) often ignore it and refuse ("I can't access the
+    // internet"). When that happens — or they answer with nothing — surface the
+    // data we already fetched so the user still gets it.
+    if (isTopLevel && grounded) {
+      const lastAnswer = [...State.messages].reverse()
+        .find(m => m.role === "assistant" && !m._isSyntheticToolCall);
+      if (looksLikeRefusal(lastAnswer?.content)) {
+        const note = State.language === "fr"
+          ? "Voici les informations que j'ai récupérées :"
+          : "Here's the information I retrieved:";
+        const msg = `${note}\n\n${grounded}`;
+        renderMessage("assistant", msg);
+        State.messages.push({ role: "assistant", content: msg, timestamp: Date.now() });
+        saveState();
+        scrollToBottom();
+        if (State.settings.ttsEnabled) speakText(grounded);
+      }
+    }
   } catch(e) {
     removeTypingIndicator(typingId);
     addSystemMsg(`Generation error: ${e.message}`, "error");
@@ -1593,9 +1614,24 @@ function needsFreshInfo(text) {
   return temporal.test(t) && question.test(t);
 }
 
+// Tiny models often ignore injected data and insist they "can't access the
+// internet". Detect that so we can surface the fetched data ourselves. The
+// inability phrase must sit near an access/internet/real-time word, so genuine
+// answers ("the real-time temperature is 18°") don't false-positive. EN + FR.
+function looksLikeRefusal(text) {
+  if (!text || !text.trim()) return true;
+  const t = text.toLowerCase();
+  return /(can'?t|cannot|can not|unable to|don'?t have|do not have|no ability to|not able to|i'?m (just |only )?an ai|as an ai|i do not|i don'?t)[^.!?\n]{0,48}(access|internet|real-?time|browse|the web|current|live data|up-?to-?date|weather|forecast)/.test(t)
+      || /(no|n'?t) (access to|ability to (access|browse|retrieve))/.test(t)
+      || /je (ne )?(peux pas|n'?ai pas (la possibilit[ée]|acc[èe]s))[^.!?\n]{0,48}(acc[èe]der|internet|temps r[ée]el|en ligne|le web|naviguer|m[ée]t[ée]o)/.test(t)
+      || /je n'?ai pas acc[èe]s (à|a) /.test(t);
+}
+
 // Fetch fresh results before the model answers, when warranted and possible.
+// Returns the fetched text (capped) so the caller can surface it directly if
+// the model refuses to use it; returns "" when nothing was fetched.
 async function maybeAutoSearch(userText) {
-  if (!needsFreshInfo(userText)) return;
+  if (!needsFreshInfo(userText)) return "";
   const s = State.settings;
   const hasProvider = (s.geminiSearchEnabled && s.geminiKey) ||
                       (s.pseEnabled && s.pseKey && s.pseCx) ||
@@ -1604,12 +1640,12 @@ async function maybeAutoSearch(userText) {
     addSystemMsg(State.language === "fr"
       ? "Cette question nécessite des informations en temps réel. Activez la recherche sans clé (onglet Recherche) — aucun jeton requis."
       : "This question needs live information. Enable Keyless Search in the Search tab — no API key required.");
-    return;
+    return "";
   }
 
   let result;
   try { result = await toolWebSearch(userText); }
-  catch(e) { logAction("error", "auto_search", e.message); return; }
+  catch(e) { logAction("error", "auto_search", e.message); return ""; }
 
   let resultStr;
   if (result && typeof result === "object") {
@@ -1619,7 +1655,8 @@ async function maybeAutoSearch(userText) {
   } else {
     resultStr = String(result || "").trim();
   }
-  if (!resultStr) return;
+  if (!resultStr) return "";
+  const capped = resultStr.slice(0, 1500);
 
   renderMessage("tool",
     `🔧 web_search(${JSON.stringify({ query: userText })}) →\n${resultStr.slice(0, 500)}`);
@@ -1631,13 +1668,19 @@ async function maybeAutoSearch(userText) {
     timestamp: Date.now(),
     _isSyntheticToolCall: true,
   });
+  // Frame the result imperatively — small models otherwise default to "I can't
+  // access the internet" even with the data right in front of them.
+  const lead = State.language === "fr"
+    ? "[Données en temps réel récupérées du web pour toi. Tu Y AS accès. Réponds à la question en utilisant UNIQUEMENT ces données ; ne dis jamais que tu n'as pas accès à internet ou aux données en temps réel.]"
+    : "[Real-time data just retrieved from the web for you. You DO have access to it. Answer using ONLY this data; never say you lack internet or real-time access.]";
   State.messages.push({
     role: "user",
-    content: `[Tool result: web_search]\n${resultStr.slice(0, 1500)}`,
+    content: `${lead}\n\n[Tool result: web_search]\n${capped}`,
     timestamp: Date.now(),
     _isTool: true,
   });
   saveState();
+  return capped;
 }
 
 function buildMessages() {
@@ -2119,9 +2162,21 @@ async function searchKeyless(query, displayResult) {
     else if (engine === "wikipedia") out = await searchWikipedia(query);
     else if (engine === "duckduckgo")out = await searchDuckDuckGo(query);
     else { // auto
-      if (looksLikeWeather(query)) out = await searchOpenMeteoWeather(query);
-      if (!out) out = await searchDuckDuckGo(query);
-      if (!out) out = await searchWikipedia(query);
+      if (looksLikeWeather(query)) {
+        // Weather stays in its own lane: if Open-Meteo can't resolve the place,
+        // say so rather than returning unrelated encyclopedia text about a
+        // similarly-named thing (e.g. "Hague School" for "The Hague").
+        out = await searchOpenMeteoWeather(query);
+        if (!out) {
+          const loc = extractLocation(query);
+          out = State.language === "fr"
+            ? `Je n'ai pas pu trouver la météo pour « ${loc || query} ». Vérifiez le nom du lieu.`
+            : `I couldn't find weather data for "${loc || query}". Please check the place name.`;
+        }
+      } else {
+        out = await searchDuckDuckGo(query);
+        if (!out) out = await searchWikipedia(query);
+      }
     }
   } catch(e) {
     out = `Keyless search error: ${e.message}`;
@@ -2182,20 +2237,46 @@ const WMO_CODES = {
   95:"thunderstorm",96:"thunderstorm w/ hail",99:"thunderstorm w/ heavy hail"
 };
 
+// Resolve a free-text location to a geo point. Open-Meteo's geocoder is a NAME
+// lookup, so "the hague netherlands" matches nothing. We try the full string,
+// then progressively drop trailing tokens; the dropped tail (often a country,
+// e.g. "netherlands") becomes a hint to disambiguate among same-named places
+// ("The Hague, NL" vs "Hague, North Dakota").
+async function geocodePlace(loc, lang) {
+  const tokens = loc.split(/\s+/).filter(Boolean);
+  for (let n = tokens.length; n >= 1; n--) {
+    const name = tokens.slice(0, n).join(" ");
+    const hint = tokens.slice(n).join(" ").toLowerCase(); // dropped tail
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=10&language=${lang}&format=json`;
+    ledgerAdd("GET", url, `Geocode: "${name}"`);
+    let results;
+    try {
+      const r = await fetch(url);
+      ledgerUpdate(r.ok ? "ok" : "err", r.status);
+      if (!r.ok) continue;
+      results = (await r.json()).results || [];
+    } catch(e) { ledgerUpdate("err", 0); continue; }
+    if (!results.length) continue;
+    if (hint) {
+      const match = results.find(p =>
+        (p.country || "").toLowerCase().includes(hint) ||
+        (p.country_code || "").toLowerCase() === hint ||
+        (p.admin1 || "").toLowerCase().includes(hint));
+      if (match) return match;
+    }
+    return results[0];
+  }
+  return null;
+}
+
 async function searchOpenMeteoWeather(query) {
   const loc = extractLocation(query);
   if (!loc) return "";
   const lang = State.language === "fr" ? "fr" : "en";
-  // 1) Geocode (keyless, CORS-enabled)
-  const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(loc)}&count=1&language=${lang}&format=json`;
-  ledgerAdd("GET", geoUrl, `Geocode: "${loc}"`);
+  // 1) Geocode (keyless, CORS-enabled) with progressive-backoff + country hint
   let place;
-  try {
-    const r = await fetch(geoUrl);
-    ledgerUpdate(r.ok ? "ok" : "err", r.status);
-    if (!r.ok) return "";
-    place = (await r.json()).results?.[0];
-  } catch(e) { ledgerUpdate("err", 0); return ""; }
+  try { place = await geocodePlace(loc, lang); }
+  catch(e) { return ""; }
   if (!place) return "";
   // 2) Forecast (keyless, CORS-enabled)
   const fUrl = `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}`
