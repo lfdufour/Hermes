@@ -487,7 +487,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b16 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b17 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -712,6 +712,17 @@
             <label>Max Tokens</label>
             <input type="number" class="form-input" id="max-tokens" value="2048" min="64" max="8192"/>
           </div>
+          <div class="form-row">
+            <label>Max context (KV cache)</label>
+            <select class="form-select" id="max-context">
+              <option value="0">Model default (largest)</option>
+              <option value="8192">8192 tokens</option>
+              <option value="4096">4096 tokens (recommended for phones)</option>
+              <option value="2048">2048 tokens (lightest)</option>
+              <option value="1024">1024 tokens</option>
+            </select>
+          </div>
+          <div class="text-muted text-sm">Lower = smaller GPU memory footprint, fewer out-of-memory crashes on phones. Takes effect the next time you load a model.</div>
           <div class="toggle-row">
             <span class="toggle-label">Stream responses</span>
             <label class="toggle"><input type="checkbox" id="toggle-stream" checked><span class="toggle-slider"></span></label>
@@ -844,6 +855,7 @@ const State = {
     systemPrompt: "",
     temperature: 0.7,
     maxTokens: 2048,
+    maxContextLength: 4096,
     stream: true,
     includeUsage: true,
     debugMode: false,
@@ -1061,6 +1073,7 @@ function bindSettings() {
   bind("openai-key", "openaiKey");
   bind("openai-model-id", "openaiModelId");
   bind("gemini-chat-model", "geminiChatModel");
+  bind("max-context", "maxContextLength");
 
   // Temperature slider
   const tempSlider = document.getElementById("temperature");
@@ -1251,10 +1264,20 @@ async function loadLocalModel(modelId) {
       if (ptxt) ptxt.textContent = p.text || `${pct}%`;
     };
 
-    State.engine = await webllm.CreateMLCEngine(modelId, {
-      initProgressCallback,
-      appConfig: webllm.prebuiltAppConfig,
-    });
+    const engineConfig = { initProgressCallback, appConfig: webllm.prebuiltAppConfig };
+    // Cap the KV-cache context window to curb GPU out-of-memory crashes on phones.
+    // Skip sliding-window models (Gemma) where this knob conflicts — they're already bounded.
+    const ctxCap = parseInt(State.settings.maxContextLength, 10) || 0;
+    const chatOpts = (ctxCap > 0 && !/gemma/i.test(modelId)) ? { context_window_size: ctxCap } : undefined;
+    try {
+      State.engine = await webllm.CreateMLCEngine(modelId, engineConfig, chatOpts);
+    } catch(e) {
+      if (chatOpts) {
+        // Cap may be unsupported for this model — fall back to its default so loading never breaks.
+        logAction("warn", "load_model", `Context cap ${ctxCap} rejected (${e.message}); retrying with model default`);
+        State.engine = await webllm.CreateMLCEngine(modelId, engineConfig);
+      } else { throw e; }
+    }
 
     State.loadedLocalModels[modelId] = true;
     State.activeModelId = modelId;
@@ -2295,7 +2318,8 @@ async function searchKeyless(query, displayResult) {
             : `I couldn't find weather data for "${loc || query}". Please check the place name.`;
         }
       } else {
-        out = await searchDuckDuckGo(query);
+        if (State.settings.searxngUrl) out = await searchSearxng(query);
+        if (!out) out = await searchDuckDuckGo(query);
         if (!out) out = await searchWikipedia(query);
       }
     }
