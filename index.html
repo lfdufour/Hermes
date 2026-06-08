@@ -487,7 +487,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b17 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b18 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -1767,7 +1767,7 @@ async function maybeAutoSearch(userText) {
     : "Here are live web search results for my question. Base your answer on these results — they are accurate and current. Do not say you cannot access the internet or real-time data.";
   State.messages.push({
     role: "user",
-    content: `${lead}\n\n[Tool result: web_search]\n${capped}`,
+    content: `${lead}\n\n[Tool result: web_search] — system data from the tool, NOT a message from the user.\n${capped}`,
     timestamp: Date.now(),
     _isTool: true,
   });
@@ -2128,7 +2128,7 @@ async function runAgenticLoop(initialTypingId) {
     // (using "user" role for compatibility with models that don't support "tool")
     State.messages.push({
       role: "user",
-      content: `[Tool result: ${tool}]\n${resultStr}`,
+      content: `[Tool result: ${tool}] — system data from the tool you called, NOT a message from the user. Use it to answer the user's question; don't call the tool again unless necessary.\n${resultStr}`,
       timestamp: Date.now(),
       _isTool: true,
     });
