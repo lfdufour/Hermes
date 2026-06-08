@@ -484,7 +484,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b12 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b13 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -1795,11 +1795,12 @@ async function generateLocalTurn(typingId) {
       const delta = chunk.choices[0]?.delta?.content || "";
       fullContent += delta;
 
-      if (typingId && !msgEl) {
+      const shown = displayText(fullContent);
+      if (!msgEl && shown) {
         removeTypingIndicator(typingId);
-        msgEl = renderMessage("assistant", fullContent, null, true);
+        msgEl = renderMessage("assistant", shown, null, true);
       } else if (msgEl) {
-        updateStreamingMessage(msgEl, fullContent);
+        updateStreamingMessage(msgEl, shown);
       }
 
       if (chunk.usage) usageInfo = chunk.usage;
@@ -1814,12 +1815,15 @@ async function generateLocalTurn(typingId) {
     fullContent = resp.choices[0]?.message?.content || "";
     usageInfo = resp.usage;
     removeTypingIndicator(typingId);
-    msgEl = renderMessage("assistant", fullContent);
+    const shownFinal = displayText(fullContent);
+    if (shownFinal) msgEl = renderMessage("assistant", shownFinal);
   }
 
   if (!msgEl) {
     removeTypingIndicator(typingId);
-    msgEl = renderMessage("assistant", fullContent || "(empty response)");
+    const shownFb = displayText(fullContent);
+    if (shownFb) msgEl = renderMessage("assistant", shownFb);
+    else if (!parseFirstToolCall(fullContent)) msgEl = renderMessage("assistant", "(empty response)");
   }
 
   // Show token usage
@@ -1835,7 +1839,7 @@ async function generateLocalTurn(typingId) {
   renderDebug("raw model output", fullContent || "(empty)");
 
   // TTS only if this is a final answer (no tool call)
-  if (s.ttsEnabled && fullContent && !parseFirstToolCall(fullContent)) speakText(fullContent);
+  if (s.ttsEnabled && fullContent && !parseFirstToolCall(fullContent)) speakText(displayText(fullContent));
 
   scrollToBottom();
   return fullContent;
@@ -1905,11 +1909,12 @@ async function generateGeminiTurn(cm, messages, typingId) {
   renderDebug("raw model output", content);
 
   removeTypingIndicator(typingId);
-  renderMessage("assistant", content);
+  const shownG = displayText(content);
+  if (shownG) renderMessage("assistant", shownG);
   State.messages.push({ role: "assistant", content, timestamp: Date.now() });
   saveState();
 
-  if (State.settings.ttsEnabled && !parseFirstToolCall(content)) speakText(content);
+  if (State.settings.ttsEnabled && !parseFirstToolCall(content)) speakText(displayText(content));
   scrollToBottom();
   return content;
 }
@@ -1962,10 +1967,11 @@ async function generateOpenAITurn(cm, messages, typingId) {
           const chunk = JSON.parse(data);
           const delta = chunk.choices?.[0]?.delta?.content || "";
           fullContent += delta;
-          if (!msgEl) {
+          const shownO = displayText(fullContent);
+          if (!msgEl && shownO) {
             removeTypingIndicator(typingId);
-            msgEl = renderMessage("assistant", fullContent, null, true);
-          } else { updateStreamingMessage(msgEl, fullContent); }
+            msgEl = renderMessage("assistant", shownO, null, true);
+          } else if (msgEl) { updateStreamingMessage(msgEl, shownO); }
         } catch(e) { /* partial JSON, skip */ }
       }
     }
@@ -1976,13 +1982,15 @@ async function generateOpenAITurn(cm, messages, typingId) {
 
   if (!msgEl) {
     removeTypingIndicator(typingId);
-    renderMessage("assistant", fullContent || "(empty)");
+    const shownOf = displayText(fullContent);
+    if (shownOf) renderMessage("assistant", shownOf);
+    else if (!parseFirstToolCall(fullContent)) renderMessage("assistant", "(empty)");
   }
   renderDebug("raw model output", fullContent || "(empty)");
   State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
   saveState();
 
-  if (State.settings.ttsEnabled && !parseFirstToolCall(fullContent)) speakText(fullContent);
+  if (State.settings.ttsEnabled && !parseFirstToolCall(fullContent)) speakText(displayText(fullContent));
   scrollToBottom();
   return fullContent;
 }
@@ -2079,6 +2087,17 @@ function parseFirstToolCall(content) {
     logAction("error", "tool_parse", `Invalid JSON in tool_call block: ${match[1].slice(0,100)}`);
   }
   return null;
+}
+
+// What the USER sees: tool-call blocks are machinery for the agentic loop, not
+// an answer — strip them from the displayed bubble. Raw content is still stored
+// in State.messages (for parsing/context) and shown verbatim in debug mode.
+function displayText(s) {
+  if (!s) return "";
+  return s
+    .replace(/```tool_call[\s\S]*?```/gi, "")   // complete tool-call blocks
+    .replace(/```tool_call[\s\S]*$/i, "")        // partial block still streaming
+    .trim();
 }
 
 /** Generate exactly one LLM turn; returns the content string */
