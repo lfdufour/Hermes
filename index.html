@@ -2143,11 +2143,23 @@ const LOC_STOPWORDS = new Set([
   "in","at","for","of","over","à","au","aux","en","dans","de","du","d","o","ou","où"
 ]);
 function extractLocation(query) {
-  return query.toLowerCase()
+  const tokens = query
     .replace(/[?.!,]/g, " ")
-    .replace(/d'/g, " ")               // elided "d'" → drop
+    .replace(/d'/g, " ")
     .split(/[\s']+/)
-    .filter(w => w && !LOC_STOPWORDS.has(w))
+    .filter(Boolean);
+  return tokens
+    .filter((w, i) => {
+      const lw = w.toLowerCase();
+      if (!LOC_STOPWORDS.has(lw)) return true;
+      // Keep "the" when it precedes a non-stop-word (e.g. "The Hague", "The Bronx")
+      if (lw === "the") {
+        const next = tokens[i + 1];
+        return next && !LOC_STOPWORDS.has(next.toLowerCase());
+      }
+      return false;
+    })
+    .map(w => w.toLowerCase())
     .join(" ")
     .trim();
 }
