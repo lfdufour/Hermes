@@ -488,7 +488,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b10 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b11 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -578,6 +578,11 @@
             <span class="toggle-label">Enable Keyless Search</span>
             <label class="toggle"><input type="checkbox" id="toggle-keyless-search"><span class="toggle-slider"></span></label>
           </div>
+          <div class="toggle-row mt-2">
+            <span class="toggle-label">Pre-search before answering</span>
+            <label class="toggle"><input type="checkbox" id="toggle-auto-search"><span class="toggle-slider"></span></label>
+          </div>
+          <div class="text-muted text-sm">Off (recommended): the model triggers searches itself using the full conversation, so follow-ups like "and tomorrow?" keep the right location. On: a web search runs automatically before the model answers (uses only the latest message, so it can mis-handle follow-ups).</div>
           <div class="form-row mt-2">
             <label>Engine</label>
             <select class="form-select" id="keyless-engine">
@@ -844,6 +849,7 @@ const State = {
     corsProxyEnabled: false,
     corsProxyUrl: "https://corsproxy.io/?",
     keylessEnabled: true,
+    autoSearch: false,
     keylessEngine: "auto",   // auto | wikipedia | duckduckgo | searxng
     searxngUrl: "",
     asrModel: "onnx-community/whisper-base",
@@ -1032,6 +1038,7 @@ function bindSettings() {
   bind("toggle-cors-proxy", "corsProxyEnabled", "checked");
   bind("cors-proxy-url", "corsProxyUrl");
   bind("toggle-keyless-search", "keylessEnabled", "checked");
+  bind("toggle-auto-search", "autoSearch", "checked");
   bind("keyless-engine", "keylessEngine");
   bind("searxng-url", "searxngUrl");
   bind("asr-model-select", "asrModel");
@@ -1584,7 +1591,7 @@ async function generateResponse(userText) {
   // own, so for clearly time-sensitive questions (weather, news, prices…)
   // we fetch fresh web results up front and feed them into context.
   let grounded = "";
-  if (isTopLevel) {
+  if (isTopLevel && State.settings.autoSearch) {
     try { grounded = (await maybeAutoSearch(userText)) || ""; }
     catch(e) { console.error("auto-search:", e); }
   }
@@ -1592,7 +1599,7 @@ async function generateResponse(userText) {
   const typingId = addTypingIndicator();
 
   try {
-    await runAgenticLoop(typingId);
+    await runAgenticLoop(typingId, userText);
 
     // Two-tier safety net: capable models answer from the grounded data above.
     // Tiny models (e.g. SmolLM) often ignore it and refuse ("I can't access the
@@ -1601,17 +1608,7 @@ async function generateResponse(userText) {
       const lastAnswer = [...State.messages].reverse()
         .find(m => m.role === "assistant" && !m._isSyntheticToolCall);
       if (looksLikeRefusal(lastAnswer?.content)) {
-        // Remove the last refusal from history
-        for (let i = State.messages.length - 1; i >= 0; i--) {
-          const m = State.messages[i];
-          if (m.role === "assistant" && !m._isSyntheticToolCall) {
-            State.messages.splice(i, 1);
-            break;
-          }
-        }
-        // Remove the last rendered assistant bubble from the DOM
-        const nodes = document.querySelectorAll("#messages .msg.assistant");
-        if (nodes.length) nodes[nodes.length - 1].remove();
+        removeLastAssistantMessage();
         // Render the fetched data as a fresh assistant message
         renderMessage("assistant", grounded);
         State.messages.push({ role: "assistant", content: grounded, timestamp: Date.now() });
@@ -1656,16 +1653,28 @@ function looksLikeRefusal(text) {
       || /je n'?ai pas acc[èe]s (à|a) /.test(t);
 }
 
+function hasSearchProvider() {
+  const s = State.settings;
+  return (s.geminiSearchEnabled && s.geminiKey) || (s.pseEnabled && s.pseKey && s.pseCx) || s.keylessEnabled;
+}
+
+function removeLastAssistantMessage() {
+  for (let i = State.messages.length - 1; i >= 0; i--) {
+    if (State.messages[i].role === "assistant" && !State.messages[i]._isSyntheticToolCall) {
+      State.messages.splice(i, 1);
+      break;
+    }
+  }
+  const nodes = document.querySelectorAll("#messages .msg.assistant");
+  if (nodes.length) nodes[nodes.length - 1].remove();
+}
+
 // Fetch fresh results before the model answers, when warranted and possible.
 // Returns the fetched text (capped) so the caller can surface it directly if
 // the model refuses to use it; returns "" when nothing was fetched.
 async function maybeAutoSearch(userText) {
   if (!needsFreshInfo(userText)) return "";
-  const s = State.settings;
-  const hasProvider = (s.geminiSearchEnabled && s.geminiKey) ||
-                      (s.pseEnabled && s.pseKey && s.pseCx) ||
-                      s.keylessEnabled;
-  if (!hasProvider) {
+  if (!hasSearchProvider()) {
     addSystemMsg(State.language === "fr"
       ? "Cette question nécessite des informations en temps réel. Activez la recherche sans clé (onglet Recherche) — aucun jeton requis."
       : "This question needs live information. Enable Keyless Search in the Search tab — no API key required.");
@@ -1756,7 +1765,7 @@ IMPORTANT: You have no built-in knowledge of real-time facts (weather, news, pri
 \`\`\`tool_call
 {"tool": "web_search", "args": {"query": "weather in Paris today"}}
 \`\`\`
-IMPORTANT: When the conversation contains a "[Tool result: web_search]" message, it holds real, up-to-date information retrieved from the web for the user's question. Treat it as ground truth and base your answer entirely on it. NEVER claim you lack internet or real-time access when such a result is present.
+IMPORTANT: When the conversation contains a "[Tool result: web_search]" message, it holds real, up-to-date information retrieved from the web for the user's question. Treat it as ground truth and base your answer entirely on it. NEVER claim you lack internet or real-time access when such a result is present. For follow-up questions, build the search query from the whole conversation (keep the same location, entity, or topic as earlier turns — e.g. if the user first asked about The Hague and then asks "what about tomorrow?", search "The Hague weather tomorrow").
 `;
 
   if (lang === "fr") {
@@ -1987,8 +1996,9 @@ async function generateOpenAITurn(cm, messages, typingId) {
 // execute → inject result as "tool" role → repeat until no tool call
 // or MAX_TOOL_ITERATIONS reached.
 
-async function runAgenticLoop(initialTypingId) {
+async function runAgenticLoop(initialTypingId, userText) {
   let iterCount = 0;
+  let nudged = false;
   let typingId = initialTypingId;
   State._stopRequested = false;
 
@@ -2007,7 +2017,22 @@ async function runAgenticLoop(initialTypingId) {
 
     // Parse first tool call in the response
     const toolCall = parseFirstToolCall(content);
-    if (!toolCall) break; // no tool call → final answer, done
+    if (!toolCall) {
+      // Pre-search is off: if a clearly-fresh-info question got a no-search answer,
+      // guide the model (once) to call web_search itself, using conversation context
+      // for the query (so follow-ups keep the right location/topic).
+      if (!nudged && !State.settings.autoSearch && content && needsFreshInfo(userText) && hasSearchProvider()) {
+        nudged = true;
+        removeLastAssistantMessage();           // drop the stale/refusal answer we just showed
+        const guide = State.language === "fr"
+          ? "Tu as besoin d'informations actuelles pour répondre. Utilise l'outil web_search MAINTENANT : produis UNIQUEMENT un bloc ```tool_call comme {\"tool\":\"web_search\",\"args\":{\"query\":\"...\"}} avec une requête construite à partir de notre conversation (garde le même lieu/sujet que les tours précédents). Ne réponds pas de mémoire et ne dis pas que tu n'as pas accès à internet."
+          : "You need current information to answer this. Use the web_search tool NOW: output ONLY a fenced ```tool_call block like {\"tool\":\"web_search\",\"args\":{\"query\":\"...\"}} with a query built from our conversation (keep the same location/topic as earlier turns). Do not answer from memory or say you lack internet access.";
+        State.messages.push({ role: "user", content: guide, timestamp: Date.now(), _isTool: true });
+        renderDebug("search nudge", guide);
+        continue;   // let the model try again
+      }
+      break;   // no tool call → final answer
+    }
 
     // Execute the tool
     const { tool, args } = toolCall;
