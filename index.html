@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#ebe1ce" />
+  <meta name="theme-color" content="#e6e3de" />
   <meta name="color-scheme" content="light" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
@@ -13,25 +13,25 @@
     /* ===== RESET & BASE ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      /* Palette: Greek antiquity — aged papyrus & marble, Aegean blue,
+      /* Palette: Greek antiquity — white marble & Pentelic stone, emerald laurel,
          red-figure terracotta, with bronze/gold for the messenger's mark. */
-      --bg0: #e4d8c2;   /* aged papyrus — main canvas */
-      --bg1: #ebe1ce;   /* topbar, side panel, input bar */
-      --bg2: #f5eddc;   /* cards, bubbles, inputs — ivory / marble */
-      --bg3: #ded2b8;   /* code blocks, secondary buttons — tan */
-      --bg4: #d0c1a1;   /* hover / toggle track — deeper tan */
-      --border: #c9b996;/* soft tan border */
-      --text0: #2b2519; /* warm ink — primary text */
-      --text1: #5a5040; /* umber — secondary text */
-      --text2: #8a7e66; /* taupe — muted text */
-      --accent: #1f5c8b;/* Aegean blue — primary accent */
+      --bg0: #f0eeea;   /* white marble — main canvas */
+      --bg1: #e6e3de;   /* topbar, side panel, input bar — Pentelic stone */
+      --bg2: #f8f7f5;   /* cards, bubbles, inputs — polished marble */
+      --bg3: #dddad4;   /* code blocks, secondary buttons — cool gray-stone */
+      --bg4: #cac6c0;   /* hover / toggle track — deeper stone */
+      --border: #c5c0b8;/* marble joint — cool tan-gray */
+      --text0: #1e1e1c; /* ink — primary text */
+      --text1: #4d4c47; /* dark gray — secondary text */
+      --text2: #888480; /* stone gray — muted text */
+      --accent: #1a7354;/* emerald laurel — primary accent */
       --accent2: #b14a33;/* terracotta — secondary (red-figure) accent */
       --gold: #a6791e;  /* bronze/gold — the messenger's mark */
-      --green: #5e7a3c; /* laurel / olive — success */
+      --green: #2d7a48; /* deep laurel — success */
       --yellow: #bd8c1f;/* gold ochre — warning */
       --red: #98231a;   /* deep brick — danger */
       --orange: #c0702b;/* bronze — accents */
-      --on-accent: #faf5ea; /* parchment-white for text on accent fills */
+      --on-accent: #f5f9f7; /* pale marble-white for text on accent fills */
       --panel-w: 340px;
       --topbar-h: 48px;
       --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -60,7 +60,7 @@
     #topbar .logo .caduceus { color: var(--accent2); font-weight: 400; }
     .pill {
       display: inline-flex; align-items: center; gap: 5px;
-      padding: 3px 9px; border-radius: 12px; font-size: 12px;
+      padding: 3px 9px; border-radius: 3px; font-size: 12px;
       border: 1px solid var(--border); background: var(--bg2);
     }
     .pill .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
@@ -99,14 +99,14 @@
     .msg.assistant, .msg.system, .msg.tool { align-self: flex-start; }
 
     .msg-bubble {
-      padding: 10px 14px; border-radius: 12px; line-height: 1.55;
+      padding: 10px 14px; border-radius: 3px; line-height: 1.55;
       word-break: break-word;
     }
     .msg.user .msg-bubble {
-      background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 3px;
+      background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 0;
     }
     .msg.assistant .msg-bubble {
-      background: var(--bg2); border: 1px solid var(--border); border-bottom-left-radius: 3px;
+      background: var(--bg2); border: 1px solid var(--border); border-bottom-left-radius: 0;
     }
     .msg.system .msg-bubble {
       background: var(--bg1); border: 1px solid var(--border);
@@ -124,8 +124,8 @@
     .msg-bubble p { margin: 4px 0; }
     .msg-bubble ul,.msg-bubble ol { margin: 4px 0 4px 20px; }
     .msg-bubble li { margin: 2px 0; }
-    .msg-bubble code { background: var(--bg3); padding: 1px 5px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
-    .msg-bubble pre { background: var(--bg3); padding: 10px; border-radius: 8px; overflow-x: auto; margin: 6px 0; }
+    .msg-bubble code { background: var(--bg3); padding: 1px 5px; border-radius: 2px; font-family: var(--mono); font-size: 12px; }
+    .msg-bubble pre { background: var(--bg3); padding: 10px; border-radius: 2px; overflow-x: auto; margin: 6px 0; }
     .msg-bubble pre code { background: none; padding: 0; }
     .msg-bubble a { color: var(--accent); }
     .msg-bubble blockquote { border-left: 3px solid var(--border); padding-left: 10px; color: var(--text1); }
@@ -144,7 +144,7 @@
 
     .citation-block {
       margin-top: 8px; padding: 8px 10px; background: var(--bg3);
-      border-radius: 8px; border-left: 3px solid var(--accent2); font-size: 12px;
+      border-radius: 2px; border-left: 3px solid var(--accent2); font-size: 12px;
     }
     .citation-block a { color: var(--accent2); word-break: break-all; }
 
@@ -156,7 +156,7 @@
     #input-row { display: flex; gap: 8px; align-items: flex-end; }
     #chat-input {
       flex: 1; background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 10px; padding: 10px 14px; color: var(--text0);
+      border-radius: 3px; padding: 10px 14px; color: var(--text0);
       font-family: var(--font); font-size: 14px; resize: none;
       min-height: 44px; max-height: 160px; outline: none;
       transition: border-color 0.15s;
@@ -165,19 +165,19 @@
     #chat-input::placeholder { color: var(--text2); }
 
     .btn {
-      padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer;
+      padding: 8px 16px; border-radius: 3px; border: none; cursor: pointer;
       font-size: 13px; font-family: var(--font); font-weight: 600;
       transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px;
     }
     .btn:disabled { opacity: 0.45; cursor: not-allowed; }
     .btn-primary { background: var(--accent); color: var(--on-accent); }
-    .btn-primary:hover:not(:disabled) { background: #17486e; }
+    .btn-primary:hover:not(:disabled) { background: #145c40; }
     .btn-secondary { background: var(--bg3); color: var(--text0); border: 1px solid var(--border); }
     .btn-secondary:hover:not(:disabled) { background: var(--bg4); }
     .btn-danger { background: var(--red); color: var(--on-accent); }
     .btn-danger:hover:not(:disabled) { background: #7a1a12; }
-    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
-    .btn-icon { padding: 8px; border-radius: 8px; background: var(--bg3); border: 1px solid var(--border); color: var(--text0); cursor: pointer; font-size: 16px; transition: all 0.15s; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 2px; }
+    .btn-icon { padding: 8px; border-radius: 3px; background: var(--bg3); border: 1px solid var(--border); color: var(--text0); cursor: pointer; font-size: 16px; transition: all 0.15s; }
     .btn-icon:hover { background: var(--bg4); }
     .btn-icon.active { background: var(--red); color: var(--on-accent); border-color: var(--red); animation: pulse 1.5s infinite; }
     @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(152,35,26,0.4)} 50%{box-shadow:0 0 0 6px rgba(152,35,26,0)} }
@@ -236,14 +236,14 @@
     .panel-header-title { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--gold); letter-spacing: 0.5px; }
     .panel-close {
       display: inline-flex; align-items: center; justify-content: center;
-      width: 38px; height: 38px; border-radius: 8px; flex-shrink: 0;
+      width: 38px; height: 38px; border-radius: 3px; flex-shrink: 0;
       background: var(--bg3); border: 1px solid var(--border); color: var(--text0);
       font-size: 18px; line-height: 1; cursor: pointer; transition: background 0.15s;
     }
     .panel-close:hover { background: var(--bg4); }
     #panel-backdrop {
       display: none; position: fixed; inset: 0; z-index: 199;
-      background: rgba(43,37,25,0.45); opacity: 0; pointer-events: none;
+      background: rgba(30,30,28,0.42); opacity: 0; pointer-events: none;
       transition: opacity 0.28s ease;
     }
     #panel-backdrop.show { opacity: 1; pointer-events: auto; }
@@ -258,7 +258,7 @@
     .form-row label { font-size: 12px; color: var(--text1); }
     .form-input, .form-select {
       background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 6px; padding: 7px 10px; color: var(--text0);
+      border-radius: 3px; padding: 7px 10px; color: var(--text0);
       font-size: 13px; font-family: var(--font); width: 100%; outline: none;
       transition: border-color 0.15s;
     }
@@ -287,18 +287,18 @@
 
     /* Model cards */
     .model-card {
-      background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 3px;
       padding: 10px 12px; margin-bottom: 8px;
     }
     .model-card.active-model { border-color: var(--accent); }
     .model-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
     .model-card-name { font-size: 13px; font-weight: 600; flex: 1; }
     .model-card-badge {
-      font-size: 10px; padding: 2px 7px; border-radius: 10px;
+      font-size: 10px; padding: 2px 7px; border-radius: 2px;
       background: var(--bg4); color: var(--text2); text-transform: uppercase;
     }
-    .model-card-badge.loaded { background: rgba(94,122,60,0.18); color: var(--green); }
-    .model-card-badge.active { background: rgba(31,92,139,0.16); color: var(--accent); }
+    .model-card-badge.loaded { background: rgba(45,122,72,0.18); color: var(--green); }
+    .model-card-badge.active { background: rgba(26,115,84,0.16); color: var(--accent); }
     .model-card-badge.loading { background: rgba(189,140,31,0.18); color: var(--yellow); }
     .model-card-size { font-size: 11px; color: var(--text2); margin-bottom: 6px; }
     .model-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -314,12 +314,12 @@
 
     /* Network ledger */
     .ledger-entry {
-      background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 2px;
       padding: 8px 10px; margin-bottom: 6px; font-size: 12px; font-family: var(--mono);
     }
     .ledger-entry-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
     .ledger-method { font-size: 10px; padding: 2px 5px; border-radius: 3px; font-weight: 700; }
-    .ledger-method.POST { background: rgba(31,92,139,0.16); color: var(--accent); }
+    .ledger-method.POST { background: rgba(26,115,84,0.16); color: var(--accent); }
     .ledger-method.GET { background: rgba(94,122,60,0.18); color: var(--green); }
     .ledger-url { color: var(--text1); word-break: break-all; flex: 1; }
     .ledger-time { color: var(--text2); font-size: 10px; flex-shrink: 0; }
@@ -332,7 +332,6 @@
     .action-entry {
       padding: 6px 10px; border-left: 3px solid var(--bg4);
       margin-bottom: 5px; font-size: 12px; background: var(--bg2);
-      border-radius: 0 6px 6px 0;
     }
     .action-entry.tool { border-left-color: var(--accent); }
     .action-entry.search { border-left-color: var(--accent2); }
@@ -343,17 +342,17 @@
 
     /* Banner */
     .banner {
-      padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 10px;
+      padding: 10px 14px; border-radius: 2px; font-size: 13px; margin-bottom: 10px;
       display: flex; align-items: flex-start; gap: 8px;
     }
     .banner.warn { background: rgba(189,140,31,0.12); border: 1px solid rgba(189,140,31,0.35); color: var(--yellow); }
     .banner.error { background: rgba(152,35,26,0.10); border: 1px solid rgba(152,35,26,0.30); color: var(--red); }
-    .banner.info { background: rgba(31,92,139,0.10); border: 1px solid rgba(31,92,139,0.30); color: var(--accent); }
-    .banner.success { background: rgba(94,122,60,0.12); border: 1px solid rgba(94,122,60,0.32); color: var(--green); }
+    .banner.info { background: rgba(26,115,84,0.10); border: 1px solid rgba(26,115,84,0.30); color: var(--accent); }
+    .banner.success { background: rgba(45,122,72,0.12); border: 1px solid rgba(45,122,72,0.32); color: var(--green); }
 
     /* Memory items */
     .memory-item {
-      background: var(--bg2); border: 1px solid var(--border); border-radius: 6px;
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 2px;
       padding: 7px 10px; margin-bottom: 5px; font-size: 12px;
       display: flex; align-items: flex-start; gap: 6px;
     }
@@ -366,12 +365,12 @@
 
     /* Progress modal */
     #global-progress {
-      position: fixed; inset: 0; background: rgba(43,37,25,0.55);
+      position: fixed; inset: 0; background: rgba(30,30,28,0.52);
       display: none; align-items: center; justify-content: center; z-index: 999;
     }
     #global-progress.visible { display: flex; }
     #global-progress-box {
-      background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 3px;
       padding: 28px 36px; min-width: 380px; max-width: 90vw;
     }
     #global-progress-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
@@ -390,7 +389,7 @@
         position: fixed; top: 0; right: 0; bottom: 0; z-index: 200;
         width: min(92vw, 380px); min-width: 0; max-width: min(92vw, 380px);
         transform: translateX(0); transition: transform 0.28s ease;
-        box-shadow: -8px 0 28px rgba(43,37,25,0.28);
+        box-shadow: -8px 0 28px rgba(30,30,28,0.24);
       }
       #side-panel.collapsed { width: min(92vw, 380px); min-width: 0; transform: translateX(100%); }
       #panel-backdrop { display: block; }
@@ -461,10 +460,11 @@
           <button id="btn-send" class="btn btn-primary btn-send-winged" title="Send" aria-label="Send" disabled>
             <svg class="sandal-icon" viewBox="0 0 36 28" aria-hidden="true" focusable="false">
               <g class="wing">
-                <path d="M11 18.5 C 7 17.5 3 14.5 1.2 10.2 C 3.6 11.6 5 11.4 5.9 10.8 C 3.4 9.6 2 7 1.8 4.2 C 4.3 6.2 5.9 6.5 6.9 6.2 C 5.2 4.5 4.7 2.3 5 0.6 C 7.6 3.4 9.7 7 11 10.8 C 11.9 13.4 11.9 16.2 11 18.5 Z"/>
+                <path d="M10 19 C6.5 17.5 3 15 1.5 11.5 C3.5 13 5 12.5 5.5 12 C3.5 10.5 2.5 8.5 3 6.5 C5 8.5 6.5 8 7.5 7.5 C6.5 5.5 7 3.5 8 2.5 C10 5.5 11 9.5 11 13.5 C11 16.5 11 19 10 19Z"/>
               </g>
-              <path class="sole" d="M8 20.3 C 10 18.9 14 18.5 19 18.5 C 25 18.5 30 18.9 32.6 19.9 C 33.7 20.3 33.7 21.4 32.6 22 C 30 23.5 24 24.1 18.5 24.1 C 13 24.1 9.4 23.3 8 22 C 7.1 21.3 7.2 20.8 8 20.3 Z"/>
-              <path class="strap" d="M12.5 19 C 14 13.4 24 13.4 25.5 19"/>
+              <path class="sole" d="M9 23 L29 23 Q34.5 23 34.5 21 L34.5 19.5 Q32 18.5 27 18.5 L9 18.5 Q6 18.5 6 20.5 Q6 23 9 23Z"/>
+              <path class="strap" d="M13 18.5 C16 14 24 13.5 27 18.5"/>
+              <path class="strap" d="M25.5 18.5 C28.5 15.5 32.5 16 34.5 20"/>
             </svg>
             <span class="sr-only">Send</span>
           </button>
@@ -472,7 +472,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b7 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b8 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -1623,6 +1623,14 @@ async function maybeAutoSearch(userText) {
 
   renderMessage("tool",
     `🔧 web_search(${JSON.stringify({ query: userText })}) →\n${resultStr.slice(0, 500)}`);
+  // Insert a synthetic assistant tool-call turn so the conversation alternates
+  // user → assistant → user (result) instead of user → user, which confuses models.
+  State.messages.push({
+    role: "assistant",
+    content: "```tool_call\n" + JSON.stringify({ tool: "web_search", args: { query: userText } }) + "\n```",
+    timestamp: Date.now(),
+    _isSyntheticToolCall: true,
+  });
   State.messages.push({
     role: "user",
     content: `[Tool result: web_search]\n${resultStr.slice(0, 1500)}`,
