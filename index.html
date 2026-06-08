@@ -227,6 +227,27 @@
     .panel-content { flex: 1; overflow-y: auto; display: none; padding: 14px; }
     .panel-content.active { display: block; }
 
+    /* Panel header (shown as a drawer header on mobile) + backdrop */
+    .panel-header {
+      display: none; align-items: center; justify-content: space-between;
+      padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--border);
+      background: var(--bg1); flex-shrink: 0;
+    }
+    .panel-header-title { font-family: var(--font-display); font-weight: 700; font-size: 15px; color: var(--gold); letter-spacing: 0.5px; }
+    .panel-close {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 38px; height: 38px; border-radius: 8px; flex-shrink: 0;
+      background: var(--bg3); border: 1px solid var(--border); color: var(--text0);
+      font-size: 18px; line-height: 1; cursor: pointer; transition: background 0.15s;
+    }
+    .panel-close:hover { background: var(--bg4); }
+    #panel-backdrop {
+      display: none; position: fixed; inset: 0; z-index: 199;
+      background: rgba(43,37,25,0.45); opacity: 0; pointer-events: none;
+      transition: opacity 0.28s ease;
+    }
+    #panel-backdrop.show { opacity: 1; pointer-events: auto; }
+
     /* Panel sections */
     .section { margin-bottom: 16px; }
     .section-title {
@@ -360,8 +381,26 @@
 
     /* Responsive */
     @media (max-width: 700px) {
-      #side-panel { position: fixed; right: 0; top: var(--topbar-h); bottom: 0; z-index: 200; }
-      #side-panel.collapsed { width: 0; }
+      /* Let the status pills wrap instead of clipping at a fixed height */
+      #topbar { height: auto; min-height: var(--topbar-h); padding-top: 5px; padding-bottom: 5px; }
+      #btn-panel-toggle { padding: 9px 14px; font-size: 13px; }
+
+      /* Side panel becomes a full-height slide-in drawer with a backdrop */
+      #side-panel {
+        position: fixed; top: 0; right: 0; bottom: 0; z-index: 200;
+        width: min(92vw, 380px); min-width: 0; max-width: min(92vw, 380px);
+        transform: translateX(0); transition: transform 0.28s ease;
+        box-shadow: -8px 0 28px rgba(43,37,25,0.28);
+      }
+      #side-panel.collapsed { width: min(92vw, 380px); min-width: 0; transform: translateX(100%); }
+      #panel-backdrop { display: block; }
+      .panel-header { display: flex; }
+      .panel-tab { padding: 13px 16px; font-size: 13px; }
+      .panel-content { padding: 16px; }
+
+      /* 16px inputs stop iOS Safari from auto-zooming on focus */
+      .form-input, .form-select, #chat-input { font-size: 16px; }
+
       #messages { padding: 12px; }
       #input-bar { padding: 10px 12px; }
     }
@@ -433,13 +472,20 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b6 · 2026-06-08 · keyless</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b7 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
 
+    <!-- Mobile drawer backdrop -->
+    <div id="panel-backdrop"></div>
+
     <!-- SIDE PANEL -->
     <div id="side-panel">
+      <div class="panel-header">
+        <span class="panel-header-title" id="panel-header-title">Models</span>
+        <button id="btn-panel-close" class="panel-close" aria-label="Close panel" title="Close">✕</button>
+      </div>
       <div class="panel-tabs">
         <div class="panel-tab active" data-tab="models">Models</div>
         <div class="panel-tab" data-tab="voice">Voice</div>
@@ -911,24 +957,32 @@ function updateMicPill(state) {
 // ── PANEL TABS ────────────────────────────────────────────────
 function initTabs() {
   document.querySelectorAll(".panel-tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      const name = tab.dataset.tab;
-      State.activeTab = name;
-      document.querySelectorAll(".panel-tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
-      document.querySelectorAll(".panel-content").forEach(c => c.classList.toggle("active", c.id === `tab-${name}`));
-    });
+    tab.addEventListener("click", () => switchTab(tab.dataset.tab));
   });
 
-  document.getElementById("btn-panel-toggle").addEventListener("click", () => {
-    State.panelOpen = !State.panelOpen;
-    document.getElementById("side-panel").classList.toggle("collapsed", !State.panelOpen);
-    document.getElementById("btn-panel-toggle").textContent = State.panelOpen ? "⚙ Panel" : "⚙ Panel";
+  document.getElementById("btn-panel-toggle").addEventListener("click", () => setPanel(!State.panelOpen));
+  document.getElementById("btn-panel-close").addEventListener("click", () => setPanel(false));
+  document.getElementById("panel-backdrop").addEventListener("click", () => setPanel(false));
+
+  // Escape closes the drawer on touch/small screens
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && State.panelOpen && window.matchMedia("(max-width: 700px)").matches) setPanel(false);
   });
 
   // Language pill click
   document.getElementById("pill-lang").addEventListener("click", () => {
     setLanguage(State.language === "en" ? "fr" : "en");
   });
+
+  // On phones, start with the drawer closed so the chat is visible first
+  if (window.matchMedia("(max-width: 700px)").matches) setPanel(false);
+}
+
+function setPanel(open) {
+  State.panelOpen = open;
+  document.getElementById("side-panel").classList.toggle("collapsed", !open);
+  const bd = document.getElementById("panel-backdrop");
+  if (bd) bd.classList.toggle("show", open);
 }
 
 // ── SETTINGS PANEL BINDING ────────────────────────────────────
@@ -1028,13 +1082,17 @@ function onSettingChange(key, value) {
 }
 
 function switchTab(name) {
-  document.querySelectorAll(".panel-tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+  let label = name;
+  document.querySelectorAll(".panel-tab").forEach(t => {
+    const on = t.dataset.tab === name;
+    t.classList.toggle("active", on);
+    if (on) label = t.textContent;
+  });
   document.querySelectorAll(".panel-content").forEach(c => c.classList.toggle("active", c.id === `tab-${name}`));
   State.activeTab = name;
-  if (!State.panelOpen) {
-    State.panelOpen = true;
-    document.getElementById("side-panel").classList.remove("collapsed");
-  }
+  const title = document.getElementById("panel-header-title");
+  if (title) title.textContent = label;
+  setPanel(true);
 }
 
 function setLanguage(lang) {
