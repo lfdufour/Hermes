@@ -484,7 +484,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b13 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b14 · 2026-06-08 · mobile</span>
         </div>
       </div>
     </div>
@@ -1595,7 +1595,7 @@ async function generateResponse(userText) {
   const typingId = addTypingIndicator();
 
   try {
-    await runAgenticLoop(typingId, userText);
+    await runAgenticLoop(typingId);
 
     // Two-tier safety net: capable models answer from the grounded data above.
     // Tiny models (e.g. SmolLM) often ignore it and refuse ("I can't access the
@@ -2000,9 +2000,8 @@ async function generateOpenAITurn(cm, messages, typingId) {
 // execute → inject result as "tool" role → repeat until no tool call
 // or MAX_TOOL_ITERATIONS reached.
 
-async function runAgenticLoop(initialTypingId, userText) {
+async function runAgenticLoop(initialTypingId) {
   let iterCount = 0;
-  let nudged = false;
   let typingId = initialTypingId;
   State._stopRequested = false;
 
@@ -2021,22 +2020,7 @@ async function runAgenticLoop(initialTypingId, userText) {
 
     // Parse first tool call in the response
     const toolCall = parseFirstToolCall(content);
-    if (!toolCall) {
-      // Pre-search is off: if a clearly-fresh-info question got a no-search answer,
-      // guide the model (once) to call web_search itself, using conversation context
-      // for the query (so follow-ups keep the right location/topic).
-      if (!nudged && !State.settings.autoSearch && content && needsFreshInfo(userText) && hasSearchProvider()) {
-        nudged = true;
-        removeLastAssistantMessage();           // drop the stale/refusal answer we just showed
-        const guide = State.language === "fr"
-          ? "Tu as besoin d'informations actuelles pour répondre. Utilise l'outil web_search MAINTENANT : produis UNIQUEMENT un bloc ```tool_call comme {\"tool\":\"web_search\",\"args\":{\"query\":\"...\"}} avec une requête construite à partir de notre conversation (garde le même lieu/sujet que les tours précédents). Ne réponds pas de mémoire et ne dis pas que tu n'as pas accès à internet."
-          : "You need current information to answer this. Use the web_search tool NOW: output ONLY a fenced ```tool_call block like {\"tool\":\"web_search\",\"args\":{\"query\":\"...\"}} with a query built from our conversation (keep the same location/topic as earlier turns). Do not answer from memory or say you lack internet access.";
-        State.messages.push({ role: "user", content: guide, timestamp: Date.now(), _isTool: true });
-        renderDebug("search nudge", guide);
-        continue;   // let the model try again
-      }
-      break;   // no tool call → final answer
-    }
+    if (!toolCall) break;   // no tool call → final answer
 
     // Execute the tool
     const { tool, args } = toolCall;
