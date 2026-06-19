@@ -37,16 +37,41 @@ export class ToolRegistry {
     if (typeof tool.run !== 'function') {
       throw new Error(`Tool "${tool.name}" must have a run() function`);
     }
+    // Tools are enabled by default. `custom`/`code` are optional metadata used
+    // by the Tools panel for user-authored, sandbox-executed tools.
+    if (tool.enabled === undefined) tool.enabled = true;
     this.#tools.set(tool.name, tool);
   }
 
   /**
-   * Return specs (name, description, parameters) for all registered tools.
+   * Remove a tool by name. Returns true if it existed.
+   * @param {string} name
+   * @returns {boolean}
+   */
+  unregister(name) {
+    return this.#tools.delete(name);
+  }
+
+  /**
+   * Enable/disable a tool. Disabled tools are hidden from list() (so the model
+   * is not offered them) but stay registered.
+   * @param {string} name
+   * @param {boolean} enabled
+   */
+  setEnabled(name, enabled) {
+    const t = this.#tools.get(name);
+    if (t) t.enabled = !!enabled;
+  }
+
+  /**
+   * Return specs (name, description, parameters) for ENABLED tools only.
+   * This is what the model is offered.
    * @returns {ToolSpec[]}
    */
   list() {
     const specs = [];
     for (const t of this.#tools.values()) {
+      if (t.enabled === false) continue;
       specs.push({
         name: t.name,
         description: t.description,
@@ -54,6 +79,25 @@ export class ToolRegistry {
       });
     }
     return specs;
+  }
+
+  /**
+   * Return metadata for ALL tools (enabled or not) for UI display.
+   * @returns {Array<{name:string, description:string, parameters:object, enabled:boolean, custom:boolean, code?:string}>}
+   */
+  listAll() {
+    const out = [];
+    for (const t of this.#tools.values()) {
+      out.push({
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+        enabled: t.enabled !== false,
+        custom: !!t.custom,
+        code: t.code,
+      });
+    }
+    return out;
   }
 
   /**

@@ -536,6 +536,32 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
     .mm-hint { color: var(--muted, #888); line-height: 1.4; margin-top: 4px; }
     .mm-hint code { font-size: 10px; background: rgba(127,127,127,.15); padding: 0 3px; border-radius: 3px; }
+
+    /* ===== Tools Panel ===== */
+    .tools-panel { display: flex; flex-direction: column; gap: 8px; }
+    .tp-list { display: flex; flex-direction: column; gap: 6px; }
+    .tp-item { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; background: var(--bg); }
+    .tp-row { display: flex; align-items: center; gap: 6px; }
+    .tp-toggle { display: flex; align-items: center; }
+    .tp-name { font-weight: 600; font-size: 0.82rem; font-family: var(--mono); }
+    .tp-badge { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.03em;
+      color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; }
+    .tp-badge-custom { color: var(--primary); border-color: var(--primary); }
+    .tp-actions { margin-left: auto; display: flex; gap: 4px; }
+    .tp-link { background: transparent; color: var(--primary); padding: 2px 6px; }
+    .tp-link:hover:not(:disabled) { background: rgba(66,99,235,.1); }
+    .tp-danger { color: var(--danger); }
+    .tp-danger:hover:not(:disabled) { background: rgba(239,68,68,.1); }
+    .tp-desc { font-size: 0.72rem; color: var(--text-muted); margin-top: 3px; }
+    .tp-editor { border: 1px solid var(--border); border-radius: 6px; padding: 8px; background: var(--surface);
+      display: flex; flex-direction: column; gap: 6px; }
+    .tp-field { display: flex; flex-direction: column; }
+    .tp-field > label { font-size: 0.72rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 3px; }
+    .tp-field code { font-size: 10px; background: rgba(127,127,127,.15); padding: 0 3px; border-radius: 3px; }
+    .tp-code { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--border);
+      border-radius: 4px; font-family: var(--mono); font-size: 11px; resize: vertical; background: var(--bg); }
+    .tp-err { color: var(--danger); font-size: 0.72rem; min-height: 0; }
+    .tp-e-buttons { display: flex; gap: 6px; align-items: center; }
   </style>
 </head>
 <body>
@@ -573,6 +599,8 @@
   <!-- Right panel: Settings / Storage / Files -->
   <aside class="right-panel">
     <div id="settings-container"></div>
+    <hr style="border:none; border-top:1px solid var(--border);">
+    <div id="tools-container"></div>
     <hr style="border:none; border-top:1px solid var(--border);">
     <div id="storage-container"></div>
     <hr style="border:none; border-top:1px solid var(--border);">

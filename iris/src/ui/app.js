@@ -12,6 +12,7 @@ import { EngineClient } from '../engine/client.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { registerBuiltins } from '../tools/builtins.js';
 import { vfs } from '../tools/vfs.js';
+import { createToolSandbox } from '../sandbox/toolSandbox.js';
 import { TraceBus, onTrace } from '../agent/trace.js';
 import { runAgent } from '../agent/loop.js';
 import { createChat } from './chat.js';
@@ -19,6 +20,7 @@ import { createInspector } from './inspector.js';
 import { createModelManager } from './modelManager.js';
 import { createStoragePanel } from './storagePanel.js';
 import { createFileManager } from './fileManager.js';
+import { createToolsPanel } from './toolsPanel.js';
 import { createSettings } from './settings.js';
 
 /**
@@ -31,6 +33,7 @@ export function initApp({ protocol }) {
   const engine = new EngineClient();
   const registry = new ToolRegistry();
   registerBuiltins(registry, { vfs });
+  const toolSandbox = createToolSandbox();
   const trace = new TraceBus();
 
   // -- DOM references (defensive null checks throughout) --
@@ -44,6 +47,7 @@ export function initApp({ protocol }) {
   const settingsContainer = $('#settings-container');
   const storageContainer = $('#storage-container');
   const fileManagerContainer = $('#file-manager-container');
+  const toolsContainer = $('#tools-container');
   const debugToggle = $('#debug-toggle');
   const newChatBtn = $('#new-chat-btn');
 
@@ -68,6 +72,10 @@ export function initApp({ protocol }) {
 
   // File manager
   const fileManager = createFileManager(fileManagerContainer, { vfs });
+
+  // Tools panel (builtins + sandboxed custom tools). Registers any persisted
+  // custom tools into the registry on construction.
+  const toolsPanel = createToolsPanel(toolsContainer, { registry, sandbox: toolSandbox });
 
   // Chat
   const chat = createChat({

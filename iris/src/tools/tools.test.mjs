@@ -149,6 +149,23 @@ console.log('--- ToolRegistry ---');
   let noRunThrew = false;
   try { reg.register({ name: 'bad', description: 'x', parameters: {} }); } catch { noRunThrew = true; }
   assert(noRunThrew, 'register throws without run()');
+
+  // --- enable/disable + listAll + unregister ---
+  reg.setEnabled('echo', false);
+  const enabledSpecs = reg.list();
+  assert(!enabledSpecs.some(s => s.name === 'echo'), 'list() hides disabled tools');
+  const all = reg.listAll();
+  const echoMeta = all.find(t => t.name === 'echo');
+  assert(echoMeta && echoMeta.enabled === false, 'listAll() reports disabled state');
+  assert(echoMeta && echoMeta.custom === false, 'listAll() marks builtins as non-custom');
+  reg.setEnabled('echo', true);
+  assert(reg.list().some(s => s.name === 'echo'), 'list() shows re-enabled tools');
+
+  reg.register({ name: 'mycustom', description: 'c', parameters: {}, custom: true, code: 'return 1;', async run() { return 1; } });
+  assert(reg.listAll().find(t => t.name === 'mycustom').custom === true, 'listAll() flags custom tools');
+  assert(reg.unregister('mycustom') === true, 'unregister returns true when removed');
+  assert(reg.has('mycustom') === false, 'tool gone after unregister');
+  assert(reg.unregister('mycustom') === false, 'unregister returns false when absent');
 }
 
 // ---------------------------------------------------------------------------
