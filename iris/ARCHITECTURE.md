@@ -104,10 +104,27 @@ createStreamParser() -> { push(textDelta) -> Event[], end() -> Event[] }
    // Events: {type:'thought', delta} | {type:'content', delta} | {type:'tool_call', call}
 parseToolCall(raw) -> { name, args }                    // tolerant
 ```
-**Important:** the exact Gemma-4 special tokens / channel delimiters (thinking channel, tool-call
-markers) are **derived from the real `tokenizer_config.json` and Google's Gemma-4 docs at build time —
-not hardcoded from training memory.** The parser is tolerant (handles missing/empty thought blocks)
-and unit-tested against captured sample outputs.
+**Gemma-4 format — references & rules.** Getting Gemma calls + tool use right is the riskiest part of
+this project, so the protocol layer is built carefully against authoritative sources and validated end
+to end early. **Do not reference Hermes' Gemma/tool-call code** — it is known to be messy and is out of
+scope. Instead:
+
+- **Primary reference:** Unsloth's Gemma-4 docs and tool-calling guide
+  (`unsloth.ai/docs/models/gemma-4`, `unsloth.ai/docs/basics/tool-calling-guide-for-local-llms`),
+  Google's Gemma-4 prompt-formatting / function-calling / thinking docs, and — authoritatively — the
+  model's own `tokenizer_config.json` chat template.
+- **Thinking:** enabled by placing `<|think|>` at the start of the system prompt; the model emits its
+  reasoning as a thought channel, e.g. `<|channel>thought\n…<channel|>`, followed by the final answer.
+- **Tool calls:** emitted as a tool-call channel, e.g. `<|tool_call>call:NAME{…json args…}<tool_call|>`.
+- **Multi-turn:** historical assistant turns keep only their *final response* (thoughts dropped), except
+  thoughts are retained *within* a turn that issues tool calls.
+
+The exact token strings above are treated as **to-be-confirmed against the live model files**, not
+hardcoded from training memory. Build flow: capture real sample outputs from the loaded model →
+write the tolerant parser (handles missing/empty thought blocks, partial streams, multiple tool calls)
+→ unit-test it against those captures → validate a full round-trip tool call before building UI on top.
+Prefer the tokenizer's own `apply_chat_template` for *encoding* so we don't re-implement the prompt
+format; the parser only handles *decoding* the emitted channels.
 
 **`tools/`**
 ```
@@ -181,10 +198,13 @@ call a file tool), and must not touch Hermes files.
 
 ## Risks / open items
 
+- **Gemma calls + tool use (highest risk).** This is where the Hermes build got messy, so Iris isolates
+  it in `protocol/gemma.js`, follows Unsloth + Google formats + the live tokenizer, captures real outputs,
+  unit-tests the parser, and validates a full tool round-trip *before* any UI is layered on. No reuse of
+  Hermes' Gemma/tool code.
 - **Module worker from Blob + CDN import** under Pages — primary path; main-thread fallback documented.
 - **Text-only sub-model loading** for the QAT-mobile multimodal-capable repos — must confirm only the
   language model loads (memory). Verified against the real `config.json` during step 1–2.
-- **Exact Gemma-4 thinking / tool-call tokens** — derived from real model files, not memory.
 - **Multi-GB Cache API quota** — mitigated via `storage.persist()` and the Storage panel; localhost/Pages
   origin (not `file://`).
 </content>
