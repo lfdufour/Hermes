@@ -999,7 +999,10 @@ function updateTopbar() {
 
   const dotM = document.getElementById("dot-model");
   const lblM = document.getElementById("label-model");
-  if (State.activeModelId) {
+  if (State.litertEngine) {
+    dotM.className = "dot dot-green";
+    lblM.textContent = "Gemma 4 E2B";
+  } else if (State.activeModelId) {
     dotM.className = "dot dot-green";
     const short = State.activeModelId.replace(/-q[0-9].*/, "").replace(/-MLC.*/, "");
     lblM.textContent = short;
@@ -1510,7 +1513,7 @@ function requestStop() {
 
 function updateSendButton() {
   const input = document.getElementById("chat-input");
-  const hasModel = !!State.activeModelId || !!State.settings.activeCloudModelId;
+  const hasModel = !!State.activeModelId || !!State.settings.activeCloudModelId || !!State.litertEngine;
   const hasText = input.value.trim().length > 0;
   const busy = !!State._generating;
 
@@ -1536,8 +1539,8 @@ function updateSendButton() {
   } else if (busy) {
     statusEl.textContent = State.language === "fr" ? "Génération en cours…" : "Generating…";
   } else {
-    const modelLabel = State.activeModelId
-      ? State.activeModelId.replace(/-q[0-9].*/, "")
+    const modelLabel = State.litertEngine ? "Gemma 4 E2B (LiteRT-LM)"
+      : State.activeModelId ? State.activeModelId.replace(/-q[0-9].*/, "")
       : State.settings.cloudModels.find(m => m.id === State.settings.activeCloudModelId)?.label || "";
     statusEl.textContent = State.language === "fr" ? `Modèle actif : ${modelLabel}` : `Active model: ${modelLabel}`;
   }
@@ -2029,7 +2032,8 @@ async function loadLitertEngine() {
     prog.style.display = "none";
     statusEl.textContent = "Gemma 4 E2B ready (LiteRT-LM)";
     statusEl.style.color = "var(--accent)";
-    document.getElementById("status-text").textContent = "Gemma 4 E2B (LiteRT-LM) active";
+    updateSendButton();
+    updateTopbar();
   } catch (e) {
     console.error("LiteRT-LM load error:", e);
     prog.style.display = "none";
@@ -2063,7 +2067,8 @@ async function unloadLitertEngine() {
   btn.textContent = "Load Gemma 4 E2B (LiteRT-LM)";
   btn.disabled = false;
   statusEl.textContent = "";
-  document.getElementById("status-text").textContent = "Load a model to start chatting";
+  updateSendButton();
+  updateTopbar();
 }
 
 /** Stream a response from LiteRT-LM Gemma 4 E2B into the chat */
