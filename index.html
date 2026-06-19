@@ -865,6 +865,7 @@ const State = {
   litertEngine: null,      // LiteRT-LM Engine instance
   litertConversation: null, // LiteRT-LM Conversation instance
   litertLoading: false,
+  _litertMsgCursor: 0,     // index into State.messages — tracks what LiteRT-LM has seen
   isRecording: false,
   mediaRecorder: null,
   audioChunks: [],
@@ -2017,15 +2018,17 @@ async function loadLitertEngine() {
     progBar.style.width = "90%";
 
     progText.textContent = "Creating conversation...";
+    const sysPrompt = State.settings.systemPrompt || getDefaultSystemPrompt();
     const conversation = await engine.createConversation({
       preface: {
-        messages: [{ role: "system", content: State.settings.systemPrompt || "You are a helpful assistant." }]
+        messages: [{ role: "system", content: sysPrompt }]
       }
     });
     progBar.style.width = "100%";
 
     State.litertEngine = engine;
     State.litertConversation = conversation;
+    State._litertMsgCursor = State.messages.length;
 
     btn.textContent = "Unload Gemma 4 E2B";
     btn.disabled = false;
@@ -2061,6 +2064,7 @@ async function unloadLitertEngine() {
   } catch(e) { console.warn("LiteRT engine delete:", e); }
   State.litertEngine = null;
   State.litertConversation = null;
+  State._litertMsgCursor = 0;
 
   const btn = document.getElementById("btn-load-litert");
   const statusEl = document.getElementById("litert-status");
@@ -2079,14 +2083,24 @@ async function generateLitertTurn(typingId) {
     return "";
   }
 
+  // LiteRT-LM maintains its own conversation history. We use _litertMsgCursor
+  // to track which State.messages have already been sent. Gather all new
+  // user-role messages (original question, auto-search results, tool results)
+  // and concatenate them into one user turn.
+  const pending = State.messages.slice(State._litertMsgCursor)
+    .filter(m => m.role === "user")
+    .map(m => m.content);
+  const textToSend = pending.join("\n\n");
+  if (!textToSend) {
+    removeTypingIndicator(typingId);
+    return "";
+  }
+  renderDebug("prompt → Gemma 4 E2B (LiteRT-LM)", textToSend.slice(0, 500));
+
   let fullContent = "";
   let msgEl = null;
 
-  // The LiteRT-LM Conversation maintains its own history, so we only
-  // send the latest user message. A plain string is auto-wrapped as
-  // { role: "user", content: text } by the library.
-  const lastUserMsg = [...State.messages].reverse().find(m => m.role === "user");
-  const stream = State.litertConversation.sendMessageStreaming(lastUserMsg?.content || "");
+  const stream = State.litertConversation.sendMessageStreaming(textToSend);
   const reader = stream.getReader();
 
   try {
@@ -2094,8 +2108,6 @@ async function generateLitertTurn(typingId) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      // Each chunk is a Message: { role, content } where content is
-      // string | Array<{ type, text }>
       let delta = "";
       if (value && typeof value.content === "string") {
         delta = value.content;
@@ -2127,7 +2139,9 @@ async function generateLitertTurn(typingId) {
     }
   }
 
-  State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
+  const cleaned = stripThink(fullContent);
+  State.messages.push({ role: "assistant", content: cleaned, timestamp: Date.now() });
+  State._litertMsgCursor = State.messages.length;
   saveState();
   if (State.settings.ttsEnabled && fullContent) speakText(displayText(fullContent));
   scrollToBottom();
@@ -2433,7 +2447,7 @@ async function generateOneTurn(existingTypingId) {
 
   try {
     // LiteRT-LM path: when the experimental engine is active, use it
-    // instead of WebLLM or cloud. Does not enter the agentic tool loop.
+    // instead of WebLLM or cloud.
     if (State.litertEngine) {
       content = await generateLitertTurn(typingId);
     } else if (State.activeModelId && State.engine) {
@@ -3454,10 +3468,21 @@ function speakText(text) {
 }
 
 // ── CONTEXT MANAGEMENT ────────────────────────────────────────
-function clearContext() {
+async function clearContext() {
   State.messages = [];
   document.getElementById("messages").innerHTML = "";
   document.getElementById("token-counter").style.display = "none";
+  // Reset LiteRT-LM conversation so it starts fresh
+  if (State.litertEngine && State.litertConversation) {
+    try {
+      await State.litertConversation.delete();
+      const sysPrompt = State.settings.systemPrompt || getDefaultSystemPrompt();
+      State.litertConversation = await State.litertEngine.createConversation({
+        preface: { messages: [{ role: "system", content: sysPrompt }] }
+      });
+    } catch(e) { console.warn("LiteRT-LM conversation reset:", e); }
+  }
+  State._litertMsgCursor = 0;
   saveState();
   addSystemMsg(State.language === "fr" ? "Contexte effacé." : "Context cleared.");
   logAction("info", "clear_context", "Conversation context cleared");
