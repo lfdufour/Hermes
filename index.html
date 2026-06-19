@@ -867,6 +867,8 @@ const State = {
   litertLoading: false,
   _litertMsgCursor: 0,     // index into State.messages — tracks what LiteRT-LM has seen
   _litertThinkActive: false, // whether the live LiteRT conversation was built with reasoning on
+  _litertBareMode: false,  // template-safe fallback: no preface, system folded into the turn
+  _litertBarePreamble: "", // pending system(+history) text to prepend on the next bare-mode send
   isRecording: false,
   mediaRecorder: null,
   audioChunks: [],
@@ -2003,10 +2005,11 @@ function litertToolSchemas() {
 // lever. If the eval shows a different literal is needed, change it here.
 const GEMMA_THINK_TOKEN = "<|think|>";
 
-// Create a LiteRT-LM conversation with native tool registration. The
-// preface.tools field is in the official 0.13.1 typedefs but undocumented in
-// the early-preview README, so register best-effort: if it throws, retry with
-// messages only (text-protocol tools in the system prompt still work).
+// Create a LiteRT-LM conversation. We pass the system prompt via preface (the
+// canonical shape from the package README) but deliberately do NOT register
+// preface.tools: Gemma 4's chat template throws "failed to apply template:
+// undefined value" while rendering them. Tool-calling still works through the
+// text protocol baked into the system prompt (parseFirstToolCall).
 //
 // opts.thinking → prefix the system prompt with GEMMA_THINK_TOKEN to turn on
 //   Gemma 4 reasoning. opts.history → prior turns (final-answers-only) replayed
@@ -2016,16 +2019,22 @@ const GEMMA_THINK_TOKEN = "<|think|>";
 async function createLitertConversation(engine, sysPrompt, opts = {}) {
   const { thinking = false, history = [] } = opts;
   const sys = thinking ? GEMMA_THINK_TOKEN + "\n" + sysPrompt : sysPrompt;
-  const messages = [{ role: "system", content: sys }, ...history];
-  const base = { preface: { messages }, filterChannelContentFromKvCache: true };
-  try {
-    return await engine.createConversation({
-      ...base, preface: { messages, tools: litertToolSchemas() }
-    });
-  } catch (e) {
-    console.warn("LiteRT-LM native tools unsupported, falling back to text protocol:", e);
-    return await engine.createConversation(base);
+
+  // Template-safe fallback: if even the system-role preface is rejected by the
+  // model's template (see generateLitertTurn), create a bare conversation and
+  // stage the system prompt + history to be folded into the next sent turn.
+  if (State._litertBareMode) {
+    const histText = history.map(m =>
+      (m.role === "assistant" ? "Assistant" : "User") + ": " + m.content).join("\n\n");
+    State._litertBarePreamble = histText ? sys + "\n\n" + histText : sys;
+    return await engine.createConversation();
   }
+
+  const messages = [{ role: "system", content: sys }, ...history];
+  return await engine.createConversation({
+    preface: { messages },
+    filterChannelContentFromKvCache: true,
+  });
 }
 
 // Final-answers-only replay of the visible conversation, used to re-seed a fresh
@@ -2118,17 +2127,21 @@ async function loadLitertEngine() {
           const totalMb = (totalBytes / 1048576).toFixed(0);
           progText.textContent = `Downloading Gemma 4 E2B... ${mb} / ${totalMb} MB`;
         } else {
+          // No content-length (HF can serve via a redirect without one): estimate
+          // against an assumed ~3 GB so the bar still moves instead of sitting at 0.
           const mb = (receivedBytes / 1048576).toFixed(0);
+          const pct = Math.min(80, (receivedBytes / (3 * 1073741824)) * 80);
+          progBar.style.width = pct + "%";
           progText.textContent = `Downloading Gemma 4 E2B... ${mb} MB`;
         }
         controller.enqueue(chunk);
       }
     }));
 
-    progText.textContent = "Loading model into engine...";
-    progBar.style.width = "85%";
-    const engine = await Engine.create({ model: trackingStream });
+    progText.textContent = "Compiling model & uploading to GPU — can take 30–60s and may look frozen…";
     progBar.style.width = "90%";
+    const engine = await Engine.create({ model: trackingStream });
+    progBar.style.width = "95%";
 
     progText.textContent = "Creating conversation...";
     const sysPrompt = State.settings.systemPrompt || getDefaultSystemPrompt();
@@ -2176,6 +2189,9 @@ async function unloadLitertEngine() {
   State.litertEngine = null;
   State.litertConversation = null;
   State._litertMsgCursor = 0;
+  State._litertThinkActive = false;
+  State._litertBareMode = false;
+  State._litertBarePreamble = "";
 
   const btn = document.getElementById("btn-load-litert");
   const statusEl = document.getElementById("litert-status");
@@ -2214,23 +2230,31 @@ async function generateLitertTurn(typingId) {
   const pending = State.messages.slice(State._litertMsgCursor)
     .filter(m => m.role === "user")
     .map(m => m.content);
-  const textToSend = pending.join("\n\n");
+  let textToSend = pending.join("\n\n");
   if (!textToSend) {
     removeTypingIndicator(typingId);
     return "";
+  }
+  // Bare-mode (template-safe fallback): fold the staged system(+history)
+  // preamble into this turn, since there's no preface to carry it.
+  if (State._litertBarePreamble) {
+    textToSend = State._litertBarePreamble + "\n\n" + textToSend;
+    State._litertBarePreamble = "";
   }
   renderDebug("prompt → Gemma 4 E2B (LiteRT-LM)", textToSend.slice(0, 500));
 
   let fullContent = "";
   let msgEl = null;
-  const nativeToolCalls = [];   // collected from chunk.tool_calls (Gemma 4 native)
-  const channelsAcc = {};       // accumulated reasoning channels (Gemma 4 "thought")
-  let loggedShape = false, loggedChannels = false;  // one-shot eval diagnostics
+  let nativeToolCalls = [];   // collected from chunk.tool_calls (Gemma 4 native)
+  let channelsAcc = {};       // accumulated reasoning channels (Gemma 4 "thought")
 
-  const stream = State.litertConversation.sendMessageStreaming(textToSend);
-  const reader = stream.getReader();
-
-  try {
+  // Read one full streamed response into the accumulators above. Factored out so
+  // it can be retried once in template-safe "bare" mode (see the catch below).
+  const runStream = async () => {
+    let loggedShape = false, loggedChannels = false;  // one-shot eval diagnostics
+    fullContent = ""; nativeToolCalls = []; channelsAcc = {};
+    const stream = State.litertConversation.sendMessageStreaming(textToSend);
+    const reader = stream.getReader();
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -2285,10 +2309,35 @@ async function generateLitertTurn(typingId) {
         updateStreamingMessage(msgEl, shown);
       }
     }
-  } catch (e) {
-    console.error("LiteRT-LM streaming error:", e);
-    if (!msgEl) removeTypingIndicator(typingId);
-    addSystemMsg("LiteRT-LM generation error: " + e.message, "error");
+  };
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await runStream();
+      break;
+    } catch (e) {
+      // Self-heal the Gemma template error once: the structured preface (system
+      // role) was rejected, so switch to bare mode — no preface, system+history
+      // folded into the turn — and retry.
+      const isTemplate = /template/i.test(e.message || "");
+      if (attempt === 0 && isTemplate && !State._litertBareMode && State.litertEngine) {
+        renderDebug("litert: template error — retrying in bare mode", e.message || String(e));
+        State._litertBareMode = true;
+        try { await State.litertConversation.delete(); } catch (_) {}
+        const sysP = State.settings.systemPrompt || getDefaultSystemPrompt();
+        State.litertConversation = await createLitertConversation(
+          State.litertEngine, sysP, { thinking: State.settings.thinkingEnabled });
+        if (State._litertBarePreamble) {
+          textToSend = State._litertBarePreamble + "\n\n" + textToSend;
+          State._litertBarePreamble = "";
+        }
+        continue;
+      }
+      console.error("LiteRT-LM streaming error:", e);
+      if (!msgEl) removeTypingIndicator(typingId);
+      addSystemMsg("LiteRT-LM generation error: " + (e.message || e), "error");
+      break;
+    }
   }
 
   // Bridge native tool calls into the text protocol the agentic loop expects:
