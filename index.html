@@ -2352,6 +2352,17 @@ async function generateLitertTurn(typingId) {
     }
   }
 
+  // Gemma 4 emits tool calls as <|tool_call>call:NAME{...}<tool_call|> text, not
+  // markdown — parse and bridge it into the same text protocol so the loop fires.
+  if (!parseFirstToolCall(fullContent)) {
+    const gc = parseGemmaToolCall(fullContent);
+    if (gc) {
+      renderDebug("gemma tool-call parsed", JSON.stringify(gc));
+      fullContent += "\n\n```tool_call\n" +
+        JSON.stringify({ tool: gc.tool, args: gc.args }) + "\n```";
+    }
+  }
+
   if (!msgEl) {
     removeTypingIndicator(typingId);
     // Don't render a bubble for a tool-call-only turn — the loop shows the
@@ -2366,7 +2377,10 @@ async function generateLitertTurn(typingId) {
   State._litertMsgCursor = State.messages.length;
   saveState();
   // Reasoning is debug-only (like Qwen3): never shown in the bubble or stored.
-  const thought = channelsAcc.thought || channelsAcc.thinking || channelsAcc.reasoning;
+  // Gemma 4 delivers it inline as <|channel>thought…<channel|>, not a structured
+  // channel — check both.
+  const inlineThought = (fullContent.match(/<\|channel>([\s\S]*?)<channel\|>/i) || [])[1];
+  const thought = channelsAcc.thought || channelsAcc.thinking || channelsAcc.reasoning || inlineThought;
   if (thought && thought.trim()) renderDebug("💭 thinking", thought.trim());
   const otherCh = Object.keys(channelsAcc).filter(k => !/^(thought|thinking|reasoning)$/i.test(k));
   if (otherCh.length) {
@@ -2638,12 +2652,93 @@ function parseFirstToolCall(content) {
   return null;
 }
 
+// ── Gemma 4 native tool-call format ───────────────────────────
+// Gemma 4 doesn't emit our ```tool_call``` markdown — it uses special tokens:
+//   <|tool_call>call:NAME{key:<|"|>str<|"|>, n:30, b:true, l:[<|"|>a<|"|>]}<tool_call|>
+// optionally preceded by a <|channel>thought…<channel|> reasoning block. LiteRT
+// passes these through as raw text, so we parse them and bridge into the text
+// protocol the agentic loop already understands. Returns {tool, args} or null.
+function parseGemmaToolCall(content) {
+  if (!content) return null;
+  const s = content.replace(/<\|channel>[\s\S]*?<channel\|>/gi, ""); // drop thought
+  const m = /<\|tool_call>([\s\S]*?)(?:<tool_call\|>|$)/i.exec(s);
+  if (!m) return null;
+  const body = m[1].trim();
+  const name = /^call:\s*([A-Za-z0-9_]+)/i.exec(body);
+  if (!name) return null;
+  let argsStr = "";
+  const b = body.indexOf("{");
+  if (b !== -1) {
+    const e = body.lastIndexOf("}");
+    argsStr = e > b ? body.slice(b + 1, e) : body.slice(b + 1);
+  }
+  return { tool: name[1], args: parseGemmaArgs(argsStr) };
+}
+
+function parseGemmaArgs(str) {
+  // Scan key:value pairs, honoring <|"|>…<|"|> string literals (which may hold
+  // commas/colons/braces) and [ … ] lists. No placeholders → no token collisions.
+  const args = {};
+  if (!str || !str.trim()) return args;
+  const n = str.length;
+  let i = 0;
+  const ws = () => { while (i < n && /\s/.test(str[i])) i++; };
+  const readValue = () => {
+    ws();
+    if (str.startsWith('<|"|>', i)) {            // string literal
+      i += 5; let v = "";
+      while (i < n && !str.startsWith('<|"|>', i)) { v += str[i]; i++; }
+      if (str.startsWith('<|"|>', i)) i += 5;
+      return v;
+    }
+    if (str[i] === "[") {                          // list
+      i++; const arr = []; ws();
+      while (i < n && str[i] !== "]") {
+        arr.push(readValue()); ws();
+        if (str[i] === ",") { i++; ws(); }
+      }
+      if (str[i] === "]") i++;
+      return arr;
+    }
+    let v = "";                                    // scalar up to , or ]
+    while (i < n && str[i] !== "," && str[i] !== "]") { v += str[i]; i++; }
+    v = v.trim();
+    if (v === "true") return true;
+    if (v === "false") return false;
+    if (v === "null") return null;
+    if (/^-?\d+(?:\.\d+)?$/.test(v)) return Number(v);
+    return v;
+  };
+  while (i < n) {
+    ws();
+    let key = "";
+    while (i < n && str[i] !== ":" && str[i] !== ",") { key += str[i]; i++; }
+    key = key.trim();
+    if (str[i] === ":") { i++; args[key] = readValue(); }
+    ws();
+    if (str[i] === ",") i++;
+  }
+  return args;
+}
+
+// Strip Gemma 4's special tokens (thought channel, tool-call/result spans, string
+// delimiters) from text shown to the user or stored as history. Closed spans
+// first, then any unclosed (mid-stream) tail.
+function stripGemmaTokens(s) {
+  return s
+    .replace(/<\|channel>[\s\S]*?<channel\|>/gi, "")
+    .replace(/<\|tool_call>[\s\S]*?<tool_call\|>/gi, "")
+    .replace(/<\|tool_result>[\s\S]*?<tool_result\|>/gi, "")
+    .replace(/<\|(?:channel|tool_call|tool_result|tool)>[\s\S]*$/i, "")
+    .replace(/<\|"\|>/g, "");
+}
+
 // What the USER sees: tool-call blocks are machinery for the agentic loop, not
 // an answer — strip them from the displayed bubble. Raw content is still stored
 // in State.messages (for parsing/context) and shown verbatim in debug mode.
 function displayText(s) {
   if (!s) return "";
-  return s
+  return stripGemmaTokens(s)
     .replace(/```tool_call[\s\S]*?```/gi, "")
     .replace(/```tool_call[\s\S]*$/i, "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -2667,7 +2762,7 @@ function thinkFallback(content) {
 // Raw output is still shown in the debug panel (extracted before this strip).
 function stripThink(s) {
   if (!s) return s;
-  return s
+  return stripGemmaTokens(s)
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/<think>[\s\S]*$/i, "")
     .trim();
