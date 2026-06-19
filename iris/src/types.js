@@ -35,17 +35,20 @@
 
 /** @typedef {{file:string, loaded:number, total:number, pct:number}} ProgressEvent */
 
-// Gemma 4 ONNX repos store each submodule separately and do NOT publish every
-// one at the same quantization. A single 'q4f16' string makes transformers.js
-// request q4f16 for ALL submodules (incl. embed_tokens), which 404s. So we use a
-// per-module dtype map. These defaults follow the common onnx-community layout;
-// if a load 404s on onnx/NAME_DTYPE.onnx, edit the dtype for NAME in the UI
-// (Model > Advanced) to a quantization that actually exists in the repo.
+// Gemma 4 ONNX repos store each submodule separately, each at its own
+// quantization. A single dtype string makes transformers.js request that dtype
+// for ALL submodules, which 404s when a module isn't published at it. So we use
+// a per-module dtype map. The values below are VERIFIED against the actual files
+// in onnx-community/gemma-4-E2B-it-qat-mobile-ONNX/onnx (these QAT-mobile builds
+// are 2-bit: q2f16 for embed/decoder/audio, fp16 for vision). The text-only
+// causal-LM path loads only embed_tokens + decoder_model_merged (low RAM);
+// vision/audio keys apply only if the multimodal fallback path is taken.
+// If a load 404s on onnx/NAME_DTYPE.onnx, edit NAME's dtype in Model > Advanced.
 const DEFAULT_DTYPE = {
-  embed_tokens: 'fp16',
+  embed_tokens: 'q2f16',
+  decoder_model_merged: 'q2f16',
+  audio_encoder: 'q2f16',
   vision_encoder: 'fp16',
-  audio_encoder: 'fp16',
-  decoder_model_merged: 'q4f16',
 };
 
 export const MODELS = [
