@@ -12,6 +12,7 @@ import { EngineClient } from '../engine/client.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { registerBuiltins } from '../tools/builtins.js';
 import { vfs } from '../tools/vfs.js';
+import { fileTags } from '../tools/fileTags.js';
 import { createToolSandbox } from '../sandbox/toolSandbox.js';
 import { TraceBus, onTrace } from '../agent/trace.js';
 import { runAgent } from '../agent/loop.js';
@@ -32,7 +33,7 @@ export function initApp({ protocol }) {
   // -- Core instances --
   const engine = new EngineClient();
   const registry = new ToolRegistry();
-  registerBuiltins(registry, { vfs });
+  registerBuiltins(registry, { vfs, fileTags });
   const toolSandbox = createToolSandbox();
   const trace = new TraceBus();
 
@@ -71,7 +72,7 @@ export function initApp({ protocol }) {
   const storagePanel = createStoragePanel(storageContainer, { engine });
 
   // File manager
-  const fileManager = createFileManager(fileManagerContainer, { vfs });
+  const fileManager = createFileManager(fileManagerContainer, { vfs, fileTags });
 
   // Tools panel (builtins + sandboxed custom tools). Registers any persisted
   // custom tools into the registry on construction.
@@ -126,10 +127,24 @@ export function initApp({ protocol }) {
       debugEnabled: () => debugMode,
     });
 
-    // Build messages array with system prompt
+    // Build messages array with system prompt. We fold in the list of tagged
+    // files so the model knows which tags it can pass to read_file/write_file.
     const messages = [];
+    const sysParts = [];
     if (settings.systemPrompt && settings.systemPrompt.trim()) {
-      messages.push({ role: 'system', content: settings.systemPrompt.trim() });
+      sysParts.push(settings.systemPrompt.trim());
+    }
+    const tags = fileTags.list();
+    if (tags.length > 0) {
+      const names = tags.map(t => t.tag).join(', ');
+      sysParts.push(
+        `The user can refer to uploaded files by a tag name. Available file tags: ${names}. ` +
+        `To read or modify one, call read_file or write_file with a "tag" argument ` +
+        `(e.g. {"tag":"${tags[0].tag}"}). Use list_tagged_files to discover tags.`
+      );
+    }
+    if (sysParts.length > 0) {
+      messages.push({ role: 'system', content: sysParts.join('\n\n') });
     }
     // Add full chat history
     for (const msg of chatHistory) {

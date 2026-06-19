@@ -14,10 +14,11 @@ import { uploadFiles, attachDropZone, saveDownload } from '../tools/io.js';
  * Create the file manager UI.
  *
  * @param {HTMLElement} container - The DOM element to render into.
- * @param {{ vfs: import('../tools/vfs.js').vfs }} deps
+ * @param {{ vfs: import('../tools/vfs.js').vfs,
+ *           fileTags?: import('../tools/fileTags.js').fileTags }} deps
  * @returns {{ refresh: () => Promise<void> }}
  */
-export function createFileManager(container, { vfs }) {
+export function createFileManager(container, { vfs, fileTags }) {
   if (!container) {
     return { refresh: async () => {} };
   }
@@ -86,6 +87,34 @@ export function createFileManager(container, { vfs }) {
         }
 
         fileListEl.appendChild(row);
+
+        // Tag editor: lets the user alias a file so it can be referenced by tag
+        // in chat and read/written by the model via read_file/write_file {tag}.
+        if (entry.kind === 'file' && fileTags) {
+          const tagRow = document.createElement('div');
+          tagRow.className = 'fm-tag-row';
+          const tagInput = document.createElement('input');
+          tagInput.className = 'fm-tag-input';
+          tagInput.type = 'text';
+          tagInput.spellcheck = false;
+          tagInput.placeholder = 'tag (e.g. report)';
+          tagInput.value = fileTags.tagForPath(entry.path) || '';
+          const commit = () => {
+            const prev = fileTags.tagForPath(entry.path);
+            const next = tagInput.value.trim();
+            if (prev && prev !== next) fileTags.removeTag(prev);
+            if (next) fileTags.set(next, entry.path);
+            else if (prev) fileTags.removeTag(prev);
+          };
+          tagInput.addEventListener('change', commit);
+          tagInput.addEventListener('blur', commit);
+          const tagLabel = document.createElement('span');
+          tagLabel.className = 'fm-tag-label';
+          tagLabel.textContent = 'tag:';
+          tagRow.appendChild(tagLabel);
+          tagRow.appendChild(tagInput);
+          fileListEl.appendChild(tagRow);
+        }
       }
     } catch (e) {
       fileListEl.innerHTML = `<div class="fm-empty">Error listing files: ${e.message}</div>`;

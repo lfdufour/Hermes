@@ -519,6 +519,25 @@
       color: var(--text-muted);
       padding: 8px 0;
     }
+    .fm-tag-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 6px 6px 22px;
+      margin-top: -2px;
+    }
+    .fm-tag-label { font-size: 0.7rem; color: var(--text-muted); }
+    .fm-tag-input {
+      flex: 1;
+      min-width: 0;
+      padding: 3px 6px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 11px;
+      background: var(--bg);
+    }
+    .fm-tag-input:focus { outline: 1px solid var(--primary); border-color: var(--primary); }
 
     /* ===== Responsive: hide sidebar/panel on small screens ===== */
     @media (max-width: 900px) {

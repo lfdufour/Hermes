@@ -211,6 +211,47 @@ console.log('\n--- Builtins (fake VFS) ---');
 }
 
 // ---------------------------------------------------------------------------
+// Builtins: tag-based file access
+// ---------------------------------------------------------------------------
+console.log('\n--- Builtins (file tags) ---');
+
+{
+  const reg = new ToolRegistry();
+  const fakeVfs = createFakeVfs();
+  const tagMap = { report: '/q3.txt' };
+  const fakeTags = {
+    get: (t) => tagMap[t],
+    list: () => Object.entries(tagMap).map(([tag, path]) => ({ tag, path })),
+    removeByPath: (p) => { for (const k of Object.keys(tagMap)) if (tagMap[k] === p) delete tagMap[k]; },
+    tagForPath: (p) => Object.keys(tagMap).find(k => tagMap[k] === p),
+  };
+  registerBuiltins(reg, { vfs: fakeVfs, fileTags: fakeTags });
+
+  await reg.invoke('write_file', { path: '/q3.txt', content: 'hello' });
+
+  const rd = await reg.invoke('read_file', { tag: 'report' });
+  assert(rd.ok === true && rd.value === 'hello', 'read_file resolves a tag to its path');
+
+  const wr = await reg.invoke('write_file', { tag: 'report', content: 'updated' });
+  assert(wr.ok === true, 'write_file resolves a tag');
+  const rd2 = await reg.invoke('read_file', { path: '/q3.txt' });
+  assert(rd2.value === 'updated', 'write_file by tag wrote to the tagged path');
+
+  const bad = await reg.invoke('read_file', { tag: 'missing' });
+  assert(bad.ok === false, 'unknown tag produces an error');
+
+  const ltf = await reg.invoke('list_tagged_files', {});
+  assert(ltf.ok === true && ltf.value.some(e => e.tag === 'report'), 'list_tagged_files returns tags');
+
+  const neither = await reg.invoke('read_file', {});
+  assert(neither.ok === false, 'read_file with neither path nor tag errors');
+
+  const delByTag = await reg.invoke('delete_file', { tag: 'report' });
+  assert(delByTag.ok === true, 'delete_file resolves a tag');
+  assert(fakeTags.get('report') === undefined, 'delete_file clears the tag mapping');
+}
+
+// ---------------------------------------------------------------------------
 // Calculator tests (via evaluate)
 // ---------------------------------------------------------------------------
 console.log('\n--- Calculator (evaluate) ---');

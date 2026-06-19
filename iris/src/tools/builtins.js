@@ -161,40 +161,60 @@ export function evaluate(expr) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolve a tool's target file to a VFS path, accepting either an explicit
+ * `path` or a `tag` (resolved via the tag registry). Tags let the user refer to
+ * uploaded files by a friendly name in chat.
+ * @param {{path?:string, tag?:string}} args
+ * @param {import('./fileTags.js').fileTags} [fileTags]
+ * @returns {string}
+ */
+function resolveTarget(args, fileTags) {
+  if (args && args.tag) {
+    const path = fileTags && fileTags.get(args.tag);
+    if (!path) throw new Error(`No file is tagged "${args.tag}". Use list_tagged_files to see available tags.`);
+    return path;
+  }
+  if (args && args.path) return args.path;
+  throw new Error('Provide a file "path" or a "tag".');
+}
+
+/**
  * Register all built-in tools on the given registry.
  * @param {import('./registry.js').ToolRegistry} registry
- * @param {{ vfs: import('./vfs.js').vfs }} deps
+ * @param {{ vfs: import('./vfs.js').vfs, fileTags?: import('./fileTags.js').fileTags }} deps
  */
-export function registerBuiltins(registry, { vfs }) {
+export function registerBuiltins(registry, { vfs, fileTags }) {
   registry.register({
     name: 'read_file',
-    description: 'Read the contents of a file from the virtual filesystem.',
+    description: 'Read a file from the virtual filesystem. Identify it by "path", or by "tag" to read a file the user tagged (e.g. {"tag":"report"}).',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'File path to read' },
+        tag: { type: 'string', description: 'Tag of an uploaded file to read (alternative to path)' },
       },
-      required: ['path'],
     },
     async run(args) {
-      return await vfs.readFile(args.path);
+      return await vfs.readFile(resolveTarget(args, fileTags));
     },
   });
 
   registry.register({
     name: 'write_file',
-    description: 'Write content to a file in the virtual filesystem, creating directories as needed.',
+    description: 'Write content to a file in the virtual filesystem (creating directories as needed). Target it by "path", or by "tag" to overwrite a file the user tagged (e.g. {"tag":"notes","content":"..."}).',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'File path to write' },
+        tag: { type: 'string', description: 'Tag of an uploaded file to overwrite (alternative to path)' },
         content: { type: 'string', description: 'Content to write' },
       },
-      required: ['path', 'content'],
+      required: ['content'],
     },
     async run(args) {
-      await vfs.writeFile(args.path, args.content);
-      return `Wrote ${args.content.length} bytes to ${args.path}`;
+      const target = resolveTarget(args, fileTags);
+      await vfs.writeFile(target, args.content);
+      return `Wrote ${args.content.length} bytes to ${target}`;
     },
   });
 
@@ -213,18 +233,36 @@ export function registerBuiltins(registry, { vfs }) {
   });
 
   registry.register({
+    name: 'list_tagged_files',
+    description: 'List the uploaded files that have a tag name, so you can read or write them by tag.',
+    parameters: { type: 'object', properties: {} },
+    async run() {
+      if (!fileTags) return [];
+      const out = [];
+      for (const { tag, path } of fileTags.list()) {
+        let size = 0;
+        try { size = (await vfs.stat(path)).size; } catch (_) { /* file may be gone */ }
+        out.push({ tag, path, size });
+      }
+      return out;
+    },
+  });
+
+  registry.register({
     name: 'delete_file',
-    description: 'Delete a file from the virtual filesystem.',
+    description: 'Delete a file from the virtual filesystem, by "path" or by "tag".',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'File path to delete' },
+        tag: { type: 'string', description: 'Tag of an uploaded file to delete (alternative to path)' },
       },
-      required: ['path'],
     },
     async run(args) {
-      await vfs.deleteFile(args.path);
-      return `Deleted ${args.path}`;
+      const target = resolveTarget(args, fileTags);
+      await vfs.deleteFile(target);
+      if (fileTags) fileTags.removeByPath(target);
+      return `Deleted ${target}`;
     },
   });
 
