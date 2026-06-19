@@ -6,16 +6,37 @@
  *   (a) shapes messages/tools and applies the multi-turn thought rule, and
  *   (b) parses model output (streaming + non-streaming).
  *
- * VERIFY: All marker strings below are PROVISIONAL and must be confirmed
- * against the model's real tokenizer_config.json special tokens map.
+ * Wire format VERIFIED against the official Gemma 4 chat template
+ * (vllm-project/vllm: examples/tool_chat_template_gemma4.jinja) and the HF
+ * "Fine-tune Gemma 4 with TRL" docs. Gemma 4 uses a bespoke (non-JSON) tool
+ * serialization with flipped-pipe control tokens:
+ *
+ *   thinking:  <|channel>thought\n ... <channel|>
+ *   tool call: <|tool_call>call:NAME{key:value,...}<tool_call|>
+ *
+ * Inside a call's {...}, keys are bare identifiers, pairs are comma-separated
+ * (no spaces), and STRING values are wrapped in the literal token <|"|> on BOTH
+ * sides (not double-quotes). Numbers/booleans are bare; objects/arrays nest.
+ * Example: <|tool_call>call:get_weather{city:<|"|>Paris<|"|>,days:3}<tool_call|>
+ *
+ * On the INPUT side the tokenizer's apply_chat_template renders these for us, so
+ * we only need to hand it the documented message/tool shapes:
+ *   - tools:        [{type:'function', function:{name,description,parameters}}]
+ *   - tool_calls:   [{type:'function', function:{name, arguments}}]
+ *   - tool results: {role:'tool', name, content}
+ *   - thinking:     pass the enable_thinking template kwarg (see worker.js)
+ *
+ * NOTE: still worth a final sanity check against a loaded Gemma 4's Debug dump
+ * (a possible `<|channel>final\n` wrapper around the answer is not handled here).
  */
 
-// ---------- Provisional marker tokens ----------
-// VERIFY: these must be confirmed against the model's tokenizer_config.json
+// ---------- Gemma 4 control tokens ----------
 const THOUGHT_OPEN  = '<|channel>thought\n';
 const THOUGHT_CLOSE = '<channel|>';
 const TOOL_OPEN     = '<|tool_call>';
 const TOOL_CLOSE    = '<tool_call|>';
+// Literal token Gemma 4 uses to delimit string values inside a tool call's args.
+const STR_DELIM     = '<|"|>';
 
 // ---------- buildMessagesForPrompt ----------
 
@@ -50,6 +71,19 @@ export function buildMessagesForPrompt(messages, { thinking = false } = {}) {
         }
       }
       // The last assistant turn keeps thoughts as-is (it may be in progress)
+
+      // Convert our internal tool_calls ({id,name,args}) into the shape the
+      // Gemma 4 chat template expects ({type:'function', function:{name,
+      // arguments}}). Reassigns to a NEW array so the caller's data is untouched.
+      if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+        msg.tool_calls = msg.tool_calls.map(tc => ({
+          type: 'function',
+          function: {
+            name: tc.name ?? tc.function?.name,
+            arguments: tc.args ?? tc.function?.arguments ?? {},
+          },
+        }));
+      }
     }
 
     out.push(msg);
@@ -61,17 +95,24 @@ export function buildMessagesForPrompt(messages, { thinking = false } = {}) {
 
 /**
  * Shape tool specs for the tokenizer's apply_chat_template.
- * Currently a pass-through that ensures each tool has the expected shape.
+ *
+ * Gemma 4's template expects OpenAI-style wrapped tools, i.e.
+ * {type:'function', function:{name, description, parameters}} (confirmed by the
+ * HF "Fine-tune Gemma 4 with TRL" example). Our registry yields the flat
+ * {name, description, parameters}, so we wrap each one here.
  *
  * @param {ToolSpec[]} tools
- * @returns {ToolSpec[]}
+ * @returns {Array<{type:'function', function:ToolSpec}>}
  */
 export function toolSpecsToTemplate(tools) {
   if (!tools || tools.length === 0) return [];
   return tools.map(t => ({
-    name: t.name,
-    description: t.description,
-    parameters: t.parameters || {},
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters || { type: 'object', properties: {} },
+    },
   }));
 }
 
@@ -145,12 +186,110 @@ function replaceSingleQuotes(s) {
   return out.join('');
 }
 
+// ---------- Gemma 4 argument parser ----------
+
+/**
+ * Parse Gemma 4's bespoke argument serialization into a JS value.
+ *
+ * Grammar (see vllm tool_chat_template_gemma4.jinja):
+ *   value  := string | object | array | scalar
+ *   string := '<|"|>' chars '<|"|>'
+ *   object := '{' (key ':' value (',' key ':' value)*)? '}'
+ *   array  := '[' (value (',' value)*)? ']'
+ *   key    := string | bareword          (bareword runs up to ':')
+ *   scalar := number | true | false | null | bareword
+ *
+ * Tolerant of surrounding whitespace. Used for the {...} body of a tool call.
+ *
+ * @param {string} s
+ * @returns {*}
+ */
+export function parseGemmaArgs(s) {
+  let i = 0;
+  const skipWs = () => { while (i < s.length && /\s/.test(s[i])) i++; };
+
+  function parseString() {
+    i += STR_DELIM.length; // opening <|"|>
+    const end = s.indexOf(STR_DELIM, i);
+    if (end === -1) { const v = s.slice(i); i = s.length; return v; }
+    const v = s.slice(i, end);
+    i = end + STR_DELIM.length;
+    return v;
+  }
+
+  function parseKey() {
+    skipWs();
+    if (s.startsWith(STR_DELIM, i)) return parseString();
+    const start = i;
+    while (i < s.length && s[i] !== ':' && s[i] !== '}' && s[i] !== ',') i++;
+    return s.slice(start, i).trim();
+  }
+
+  function parseScalar() {
+    const start = i;
+    while (i < s.length && s[i] !== ',' && s[i] !== '}' && s[i] !== ']') i++;
+    const raw = s.slice(start, i).trim();
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    if (raw === 'null' || raw === 'None') return null;
+    if (raw !== '' && !Number.isNaN(Number(raw))) return Number(raw);
+    return raw; // bareword fallback
+  }
+
+  function parseValue() {
+    skipWs();
+    if (s.startsWith(STR_DELIM, i)) return parseString();
+    const c = s[i];
+    if (c === '{') return parseObject();
+    if (c === '[') return parseArray();
+    return parseScalar();
+  }
+
+  function parseObject() {
+    i++; // consume '{'
+    const obj = {};
+    skipWs();
+    if (s[i] === '}') { i++; return obj; }
+    while (i < s.length) {
+      const key = parseKey();
+      skipWs();
+      if (s[i] === ':') i++;
+      obj[key] = parseValue();
+      skipWs();
+      if (s[i] === ',') { i++; continue; }
+      if (s[i] === '}') { i++; break; }
+      break;
+    }
+    return obj;
+  }
+
+  function parseArray() {
+    i++; // consume '['
+    const arr = [];
+    skipWs();
+    if (s[i] === ']') { i++; return arr; }
+    while (i < s.length) {
+      arr.push(parseValue());
+      skipWs();
+      if (s[i] === ',') { i++; continue; }
+      if (s[i] === ']') { i++; break; }
+      break;
+    }
+    return arr;
+  }
+
+  return parseValue();
+}
+
 // ---------- parseToolCall ----------
 
 /**
  * Parse a single raw tool call string into a ToolCall.
- * Expected format (VERIFY): call:NAME{ ...json... }
- * Tolerant: handles single quotes, trailing commas, etc.
+ *
+ * Format: "call:NAME{...}" (the text between <|tool_call> and <tool_call|>).
+ * The {...} body uses Gemma 4's serialization when it contains the <|"|> string
+ * token; otherwise we treat it as (possibly malformed) JSON so non-Gemma models
+ * and hand-written calls still parse. The leading "call:" is optional.
  *
  * @param {string} raw  — the text between <|tool_call> and <tool_call|>
  * @returns {ToolCall}
@@ -158,21 +297,26 @@ function replaceSingleQuotes(s) {
 export function parseToolCall(raw) {
   const trimmed = raw.trim();
 
-  // VERIFY: format is "call:NAME{json}" or "call:NAME {json}"
-  const match = trimmed.match(/^call:([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{[\s\S]*\})$/);
+  let match = trimmed.match(/^call:([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{[\s\S]*\})$/);
   if (!match) {
-    // Fallback: try without the call: prefix
-    const fallback = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{[\s\S]*\})$/);
-    if (!fallback) {
+    // Fallback: allow the call without the "call:" prefix.
+    match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{[\s\S]*\})$/);
+    if (!match) {
       throw new Error(`Cannot parse tool call: ${trimmed.slice(0, 100)}`);
     }
-    const name = fallback[1];
-    const args = repairAndParseJSON(fallback[2]);
-    return { id: generateId(), name, args };
   }
 
   const name = match[1];
-  const args = repairAndParseJSON(match[2]);
+  const body = match[2];
+  let args;
+  if (body.includes(STR_DELIM)) {
+    args = parseGemmaArgs(body);
+  } else {
+    // JSON (or JSON-ish) body — tolerate single quotes / trailing commas.
+    try { args = repairAndParseJSON(body); }
+    catch (_) { args = parseGemmaArgs(body); }
+  }
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) args = {};
   return { id: generateId(), name, args };
 }
 

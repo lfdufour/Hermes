@@ -109,9 +109,10 @@ async function executeNodes(nodes, services) {
           context.__messages = result.messages;
         } else {
           // Single shot: applyChatTemplate -> generate
-          const toolSpecs = node.tools === '*' ? registry.list() :
+          const flatSpecs = node.tools === '*' ? registry.list() :
                             node.tools ? registry.list().filter(t => node.tools.includes(t.name)) :
                             [];
+          const toolSpecs = protocol.toolSpecsToTemplate(flatSpecs);
 
           const shaped = protocol.buildMessagesForPrompt(messages, { thinking });
           const { input_ids } = await engine.applyChatTemplate({

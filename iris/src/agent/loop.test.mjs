@@ -11,13 +11,14 @@ import { runAgent } from './loop.js';
 import { TraceBus } from './trace.js';
 import {
   buildMessagesForPrompt,
+  toolSpecsToTemplate,
   createStreamParser,
   splitFinal,
 } from '../protocol/gemma.js';
 
 // ---------- Helpers ----------
 
-const protocol = { buildMessagesForPrompt, createStreamParser, splitFinal };
+const protocol = { buildMessagesForPrompt, toolSpecsToTemplate, createStreamParser, splitFinal };
 
 function makeTrace() {
   const events = [];

@@ -84,14 +84,16 @@ test('buildMessagesForPrompt: handles messages with no assistant turns', () => {
 // toolSpecsToTemplate
 // ============================================================
 
-test('toolSpecsToTemplate: shapes tool specs correctly', () => {
+test('toolSpecsToTemplate: wraps tool specs in OpenAI/Gemma-4 function shape', () => {
   const tools = [
     { name: 'read_file', description: 'Read a file', parameters: { type: 'object', properties: { path: { type: 'string' } } } },
   ];
   const result = toolSpecsToTemplate(tools);
   assertEq(result.length, 1, 'one tool');
-  assertEq(result[0].name, 'read_file', 'name preserved');
-  assert(result[0].parameters.type === 'object', 'parameters preserved');
+  assertEq(result[0].type, 'function', 'type: function');
+  assertEq(result[0].function.name, 'read_file', 'name preserved under function');
+  assertEq(result[0].function.description, 'Read a file', 'description preserved');
+  assert(result[0].function.parameters.type === 'object', 'parameters preserved');
 });
 
 test('toolSpecsToTemplate: returns empty array for no tools', () => {
@@ -128,6 +130,32 @@ test('parseToolCall: handles space between name and JSON', () => {
   const result = parseToolCall('call:now {}');
   assertEq(result.name, 'now', 'name');
   assertEq(JSON.stringify(result.args), '{}', 'empty args');
+});
+
+// --- Gemma 4 native serialization (<|"|> string delims, bare key:value) ---
+
+test('parseToolCall: Gemma 4 string arg with <|"|> delimiters', () => {
+  const result = parseToolCall('call:get_weather{city:<|"|>Paris<|"|>}');
+  assertEq(result.name, 'get_weather', 'name');
+  assertEq(result.args.city, 'Paris', 'string value unwrapped from <|"|>');
+});
+
+test('parseToolCall: Gemma 4 multiple args, mixed types', () => {
+  const result = parseToolCall('call:search{query:<|"|>mars distance<|"|>,limit:5,verbose:true}');
+  assertEq(result.args.query, 'mars distance', 'string arg');
+  assertEq(result.args.limit, 5, 'number arg');
+  assertEq(result.args.verbose, true, 'boolean arg');
+});
+
+test('parseToolCall: Gemma 4 nested object + array args', () => {
+  const result = parseToolCall('call:plot{loc:{city:<|"|>Rome<|"|>},days:[1,2,3]}');
+  assertEq(result.args.loc.city, 'Rome', 'nested string');
+  assertEq(result.args.days, [1, 2, 3], 'array of numbers');
+});
+
+test('parseToolCall: Gemma 4 string containing braces/commas', () => {
+  const result = parseToolCall('call:echo{text:<|"|>a, {b}: c<|"|>}');
+  assertEq(result.args.text, 'a, {b}: c', 'punctuation inside string preserved');
 });
 
 // ============================================================
@@ -181,6 +209,25 @@ test('splitFinal: tool call with no thinking', () => {
   assertEq(result.tool_calls.length, 1, 'one tool call');
   assertEq(result.tool_calls[0].name, 'calculator', 'tool name');
   assertEq(result.content, 'Sure, let me check.', 'content before tool call');
+});
+
+test('splitFinal: Gemma 4 native tool call with <|"|> args', () => {
+  const text = 'Let me check.<|tool_call>call:get_weather{city:<|"|>Tokyo<|"|>}<tool_call|>';
+  const result = splitFinal(text);
+  assertEq(result.tool_calls.length, 1, 'one tool call');
+  assertEq(result.tool_calls[0].name, 'get_weather', 'tool name');
+  assertEq(result.tool_calls[0].args.city, 'Tokyo', 'gemma-serialized arg');
+  assertEq(result.content, 'Let me check.', 'content before call');
+});
+
+test('stream: Gemma 4 native tool call with <|"|> args', () => {
+  const parser = createStreamParser();
+  const events = [];
+  events.push(...parser.push('<|tool_call>call:search{q:<|"|>hello<|"|>}<tool_call|>'));
+  events.push(...parser.end());
+  const toolCalls = events.filter(e => e.type === 'tool_call');
+  assertEq(toolCalls.length, 1, 'one tool call');
+  assertEq(toolCalls[0].call.args.q, 'hello', 'gemma-serialized arg streamed');
 });
 
 // ============================================================

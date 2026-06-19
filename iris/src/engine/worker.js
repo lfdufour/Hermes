@@ -127,10 +127,8 @@ async function loadModel(id, { repo, dtype = 'q4f16', device = 'auto' }) {
 /**
  * Apply the chat template to produce input_ids and the rendered prompt string.
  *
- * If `thinking` is true, we prepend '<|think|>' to the system message content
- * as a provisional thinking-mode control token.
- * NOTE: This is provisional; the real control mechanism should be verified
- * via tokenizerInfo() against the model's actual special tokens.
+ * Thinking mode is controlled by the `enable_thinking` template kwarg (the
+ * Gemma 4 template reads it), NOT by injecting a token into the system message.
  */
 function applyChatTemplate(id, { messages, tools, thinking }) {
   if (!tokenizer) {
@@ -141,17 +139,12 @@ function applyChatTemplate(id, { messages, tools, thinking }) {
   // Deep-clone messages so we don't mutate the caller's data
   let shaped = JSON.parse(JSON.stringify(messages));
 
-  // If thinking mode, ensure system message content begins with '<|think|>'
-  if (thinking && shaped.length > 0 && shaped[0].role === 'system') {
-    if (!shaped[0].content.startsWith('<|think|>')) {
-      shaped[0].content = '<|think|>\n' + shaped[0].content;
-    }
-  }
-
-  // Build template options
+  // Build template options. `enable_thinking` is forwarded to the Jinja
+  // template (Gemma 4 / Qwen3-style thinking toggle).
   const templateOpts = {
     add_generation_prompt: true,
     return_dict: true,
+    enable_thinking: !!thinking,
   };
   if (tools && tools.length > 0) {
     templateOpts.tools = tools;

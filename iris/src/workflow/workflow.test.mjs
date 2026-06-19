@@ -50,6 +50,7 @@ function makeTrace() {
  */
 const fakeProtocol = {
   buildMessagesForPrompt(messages) { return messages; },
+  toolSpecsToTemplate(tools) { return tools || []; },
   createStreamParser() {
     return {
       push() { return []; },

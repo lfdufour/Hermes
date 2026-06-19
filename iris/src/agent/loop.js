@@ -51,9 +51,9 @@ export async function runAgent({
         return { messages, finalText };
       }
 
-      // (a) Shape messages and gather tool specs
+      // (a) Shape messages and gather tool specs (wrapped for the template)
       const shaped = protocol.buildMessagesForPrompt(messages, { thinking });
-      const toolSpecs = registry.list();
+      const toolSpecs = protocol.toolSpecsToTemplate(registry.list());
 
       // (b) Apply chat template (tokenize)
       const { input_ids, rendered } = await engine.applyChatTemplate({
