@@ -487,7 +487,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b21 · 2026-06-08 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b22 · 2026-06-19 · mobile</span>
         </div>
       </div>
     </div>
@@ -516,6 +516,27 @@
         <div class="section">
           <div class="section-title">Local Models (WebLLM)</div>
           <div id="model-list"></div>
+        </div>
+        <hr class="divider">
+        <!-- LiteRT-LM experimental section -->
+        <div class="section">
+          <div class="section-title">LiteRT-LM (Experimental)</div>
+          <div id="litert-section">
+            <div style="font-size:0.82em;color:var(--text-muted);margin-bottom:8px">
+              Gemma 4 E2B via Google LiteRT-LM. WebGPU, text-only, ~2 GB download. Desktop-class GPU recommended.
+            </div>
+            <button class="btn btn-secondary btn-sm w-full" id="btn-load-litert"
+              title="Load Gemma 4 E2B (LiteRT-LM) — experimental, desktop-class, ~2 GB">
+              Load Gemma 4 E2B (LiteRT-LM)
+            </button>
+            <div id="litert-progress" style="display:none;margin-top:6px">
+              <div id="litert-progress-text" style="font-size:0.8em;color:var(--text-muted)">Initializing...</div>
+              <div style="height:4px;background:var(--bg-tertiary);border-radius:2px;overflow:hidden;margin-top:3px">
+                <div id="litert-progress-bar" style="width:0%;height:100%;background:var(--accent);transition:width 0.3s"></div>
+              </div>
+            </div>
+            <div id="litert-status" style="font-size:0.8em;margin-top:4px"></div>
+          </div>
         </div>
         <hr class="divider">
         <div class="section">
@@ -840,6 +861,10 @@ const State = {
   asrPipeline: null,       // transformers.js pipeline
   asrLoaded: false,
   asrLoading: false,
+  // LiteRT-LM (experimental Gemma 4 E2B backend)
+  litertEngine: null,      // LiteRT-LM Engine instance
+  litertConversation: null, // LiteRT-LM Conversation instance
+  litertLoading: false,
   isRecording: false,
   mediaRecorder: null,
   audioChunks: [],
@@ -1099,6 +1124,12 @@ function bindSettings() {
   document.getElementById("btn-add-gemini-cloud").addEventListener("click", addGeminiCloudModel);
   document.getElementById("btn-add-cloud").addEventListener("click", () => {
     switchTab("settings");
+  });
+
+  // LiteRT-LM experimental button
+  document.getElementById("btn-load-litert").addEventListener("click", () => {
+    if (State.litertEngine) { unloadLitertEngine(); }
+    else { loadLitertEngine(); }
   });
 
   // Memory buttons
@@ -1925,6 +1956,156 @@ async function generateLocalTurn(typingId) {
   return fullContent;
 }
 
+// ── LiteRT-LM EXPERIMENTAL BACKEND ────────────────────────────
+// Isolated proof-of-concept: Gemma 4 E2B via Google LiteRT-LM.
+// Does not integrate with the agentic tool loop or buildMessages.
+const LITERT_MODEL_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm";
+
+async function loadLitertEngine() {
+  if (State.litertLoading || State.litertEngine) return;
+  State.litertLoading = true;
+
+  const btn = document.getElementById("btn-load-litert");
+  const prog = document.getElementById("litert-progress");
+  const progText = document.getElementById("litert-progress-text");
+  const progBar = document.getElementById("litert-progress-bar");
+  const statusEl = document.getElementById("litert-status");
+
+  btn.disabled = true;
+  btn.textContent = "Loading...";
+  prog.style.display = "block";
+  progText.textContent = "Importing LiteRT-LM runtime (~18 MB WASM)...";
+  progBar.style.width = "5%";
+  statusEl.textContent = "";
+
+  try {
+    // Lazy-import @litert-lm/core only when user clicks load
+    const { Engine } = await import("https://cdn.jsdelivr.net/npm/@litert-lm/core@0.13.1/+esm");
+
+    progText.textContent = "Downloading Gemma 4 E2B model (~2 GB)...";
+    progBar.style.width = "15%";
+
+    // Engine.create fetches and loads the model internally.
+    // There is no progress callback in the current API, so we show an
+    // indeterminate-style update.
+    const engine = await Engine.create({ model: LITERT_MODEL_URL });
+    progBar.style.width = "90%";
+
+    progText.textContent = "Creating conversation...";
+    const conversation = await engine.createConversation({
+      preface: {
+        messages: [{ role: "system", content: State.settings.systemPrompt || "You are a helpful assistant." }]
+      }
+    });
+    progBar.style.width = "100%";
+
+    State.litertEngine = engine;
+    State.litertConversation = conversation;
+
+    btn.textContent = "Unload Gemma 4 E2B";
+    btn.disabled = false;
+    prog.style.display = "none";
+    statusEl.textContent = "Gemma 4 E2B ready (LiteRT-LM)";
+    statusEl.style.color = "var(--accent)";
+    document.getElementById("status-text").textContent = "Gemma 4 E2B (LiteRT-LM) active";
+  } catch (e) {
+    console.error("LiteRT-LM load error:", e);
+    prog.style.display = "none";
+    btn.disabled = false;
+    btn.textContent = "Load Gemma 4 E2B (LiteRT-LM)";
+    const msg = e.message || String(e);
+    // Detect WebGPU unavailability
+    if (msg.includes("GPU") || msg.includes("WebGPU") || msg.includes("adapter")) {
+      statusEl.textContent = "WebGPU not available. Use a desktop browser with WebGPU support (Chrome 113+).";
+    } else {
+      statusEl.textContent = "Load failed: " + msg;
+    }
+    statusEl.style.color = "var(--error, #e53e3e)";
+  } finally {
+    State.litertLoading = false;
+  }
+}
+
+async function unloadLitertEngine() {
+  try {
+    if (State.litertConversation) { await State.litertConversation.delete(); }
+  } catch(e) { console.warn("LiteRT conversation delete:", e); }
+  try {
+    if (State.litertEngine) { await State.litertEngine.delete(); }
+  } catch(e) { console.warn("LiteRT engine delete:", e); }
+  State.litertEngine = null;
+  State.litertConversation = null;
+
+  const btn = document.getElementById("btn-load-litert");
+  const statusEl = document.getElementById("litert-status");
+  btn.textContent = "Load Gemma 4 E2B (LiteRT-LM)";
+  btn.disabled = false;
+  statusEl.textContent = "";
+  document.getElementById("status-text").textContent = "Load a model to start chatting";
+}
+
+/** Stream a response from LiteRT-LM Gemma 4 E2B into the chat */
+async function generateLitertTurn(typingId) {
+  if (!State.litertConversation) {
+    removeTypingIndicator(typingId);
+    addSystemMsg("LiteRT-LM conversation not initialized.", "error");
+    return "";
+  }
+
+  let fullContent = "";
+  let msgEl = null;
+
+  // The LiteRT-LM Conversation maintains its own history, so we only
+  // send the latest user message. A plain string is auto-wrapped as
+  // { role: "user", content: text } by the library.
+  const lastUserMsg = [...State.messages].reverse().find(m => m.role === "user");
+  const stream = State.litertConversation.sendMessageStreaming(lastUserMsg?.content || "");
+  const reader = stream.getReader();
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      // Each chunk is a Message: { role, content } where content is
+      // string | Array<{ type, text }>
+      let delta = "";
+      if (value && typeof value.content === "string") {
+        delta = value.content;
+      } else if (value?.content?.[0]?.text) {
+        delta = value.content[0].text;
+      }
+      fullContent += delta;
+
+      const shown = displayText(fullContent);
+      if (!msgEl && shown) {
+        removeTypingIndicator(typingId);
+        msgEl = renderMessage("assistant", shown, null, true);
+      } else if (msgEl) {
+        updateStreamingMessage(msgEl, shown);
+      }
+    }
+  } catch (e) {
+    console.error("LiteRT-LM streaming error:", e);
+    if (!msgEl) removeTypingIndicator(typingId);
+    addSystemMsg("LiteRT-LM generation error: " + e.message, "error");
+  }
+
+  if (!msgEl) {
+    removeTypingIndicator(typingId);
+    if (fullContent.trim()) {
+      msgEl = renderMessage("assistant", displayText(fullContent) || fullContent);
+    } else {
+      msgEl = renderMessage("assistant", "(empty response)");
+    }
+  }
+
+  State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
+  saveState();
+  if (State.settings.ttsEnabled && fullContent) speakText(displayText(fullContent));
+  scrollToBottom();
+  return fullContent;
+}
 
 async function generateCloudTurn(typingId) {
   const cm = State.settings.cloudModels.find(m => m.id === State.settings.activeCloudModelId);
@@ -2224,7 +2405,11 @@ async function generateOneTurn(existingTypingId) {
   let content = "";
 
   try {
-    if (State.activeModelId && State.engine) {
+    // LiteRT-LM path: when the experimental engine is active, use it
+    // instead of WebLLM or cloud. Does not enter the agentic tool loop.
+    if (State.litertEngine) {
+      content = await generateLitertTurn(typingId);
+    } else if (State.activeModelId && State.engine) {
       content = await generateLocalTurn(typingId);
     } else if (State.settings.activeCloudModelId) {
       content = await generateCloudTurn(typingId);
