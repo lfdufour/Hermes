@@ -1961,9 +1961,53 @@ async function generateLocalTurn(typingId) {
 }
 
 // ── LiteRT-LM EXPERIMENTAL BACKEND ────────────────────────────
-// Isolated proof-of-concept: Gemma 4 E2B via Google LiteRT-LM.
-// Does not integrate with the agentic tool loop or buildMessages.
+// Experimental: Gemma 4 E2B via Google LiteRT-LM, wired into the agentic
+// tool loop. Gemma 4 supports NATIVE structured tool-calling (preface.tools
+// as JSON Schema; tool_calls on response Messages), so we register the Hermes
+// tools natively AND keep the text protocol in the system prompt as a fallback.
 const LITERT_MODEL_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm";
+
+// JSON-Schema tool definitions for LiteRT-LM's native function calling
+// (Preface.tools). Names/args mirror dispatchTool() exactly.
+function litertToolSchemas() {
+  const str = (desc) => ({ type: "string", description: desc });
+  return [
+    { name: "web_search", description: "Search the web for live/real-time information.",
+      parameters: { type: "object", properties: { query: str("Search query") }, required: ["query"] } },
+    { name: "fetch_url", description: "Fetch and extract text from a URL.",
+      parameters: { type: "object", properties: { url: str("URL to fetch") }, required: ["url"] } },
+    { name: "set_language", description: "Change the UI language.",
+      parameters: { type: "object", properties: { lang: { type: "string", enum: ["en", "fr"] } }, required: ["lang"] } },
+    { name: "set_model", description: "Switch the active model.",
+      parameters: { type: "object", properties: { id: str("Model id") }, required: ["id"] } },
+    { name: "clear_context", description: "Clear the conversation history.",
+      parameters: { type: "object", properties: {} } },
+    { name: "remember", description: "Save a fact to the memory store.",
+      parameters: { type: "object", properties: { text: str("Text to remember") }, required: ["text"] } },
+    { name: "recall", description: "Search the memory store.",
+      parameters: { type: "object", properties: { query: str("What to recall") }, required: ["query"] } },
+    { name: "calculate", description: "Safely evaluate a math expression.",
+      parameters: { type: "object", properties: { expr: str("Math expression") }, required: ["expr"] } },
+    { name: "current_datetime", description: "Get the current date and time.",
+      parameters: { type: "object", properties: {} } },
+  ];
+}
+
+// Create a LiteRT-LM conversation with native tool registration. The
+// preface.tools field is in the official 0.13.1 typedefs but undocumented in
+// the early-preview README, so register best-effort: if it throws, retry with
+// messages only (text-protocol tools in the system prompt still work).
+async function createLitertConversation(engine, sysPrompt) {
+  const messages = [{ role: "system", content: sysPrompt }];
+  try {
+    return await engine.createConversation({
+      preface: { messages, tools: litertToolSchemas() }
+    });
+  } catch (e) {
+    console.warn("LiteRT-LM native tools unsupported, falling back to text protocol:", e);
+    return await engine.createConversation({ preface: { messages } });
+  }
+}
 
 async function loadLitertEngine() {
   if (State.litertLoading || State.litertEngine) return;
@@ -2019,11 +2063,7 @@ async function loadLitertEngine() {
 
     progText.textContent = "Creating conversation...";
     const sysPrompt = State.settings.systemPrompt || getDefaultSystemPrompt();
-    const conversation = await engine.createConversation({
-      preface: {
-        messages: [{ role: "system", content: sysPrompt }]
-      }
-    });
+    const conversation = await createLitertConversation(engine, sysPrompt);
     progBar.style.width = "100%";
 
     State.litertEngine = engine;
@@ -2099,6 +2139,7 @@ async function generateLitertTurn(typingId) {
 
   let fullContent = "";
   let msgEl = null;
+  const nativeToolCalls = [];   // collected from chunk.tool_calls (Gemma 4 native)
 
   const stream = State.litertConversation.sendMessageStreaming(textToSend);
   const reader = stream.getReader();
@@ -2108,13 +2149,22 @@ async function generateLitertTurn(typingId) {
       const { done, value } = await reader.read();
       if (done) break;
 
+      // Text content: a chunk's content is string | Array<{type,text}>.
+      // Iterate ALL items (not just [0]) and keep only text parts.
       let delta = "";
       if (value && typeof value.content === "string") {
         delta = value.content;
-      } else if (value?.content?.[0]?.text) {
-        delta = value.content[0].text;
+      } else if (Array.isArray(value?.content)) {
+        for (const item of value.content) {
+          if (item && item.type === "text" && item.text) delta += item.text;
+        }
       }
       fullContent += delta;
+
+      // Native structured tool calls arrive on a separate field.
+      if (Array.isArray(value?.tool_calls)) {
+        for (const tc of value.tool_calls) nativeToolCalls.push(tc);
+      }
 
       const shown = displayText(fullContent);
       if (!msgEl && shown) {
@@ -2130,20 +2180,36 @@ async function generateLitertTurn(typingId) {
     addSystemMsg("LiteRT-LM generation error: " + e.message, "error");
   }
 
+  // Bridge native tool calls into the text protocol the agentic loop expects:
+  // append a ```tool_call block so parseFirstToolCall() picks it up unchanged.
+  if (nativeToolCalls.length && !parseFirstToolCall(fullContent)) {
+    const fn = nativeToolCalls[0].function || {};
+    let args = fn.arguments;
+    if (typeof args === "string") { try { args = JSON.parse(args); } catch(_) { args = {}; } }
+    if (fn.name) {
+      fullContent += "\n\n```tool_call\n" +
+        JSON.stringify({ tool: fn.name, args: args || {} }) + "\n```";
+    }
+  }
+
   if (!msgEl) {
     removeTypingIndicator(typingId);
-    if (fullContent.trim()) {
-      msgEl = renderMessage("assistant", displayText(fullContent) || fullContent);
-    } else {
-      msgEl = renderMessage("assistant", "(empty response)");
-    }
+    // Don't render a bubble for a tool-call-only turn — the loop shows the
+    // tool chip separately. Match generateLocalTurn's behavior exactly.
+    const shownFb = displayText(fullContent) || thinkFallback(fullContent);
+    if (shownFb) msgEl = renderMessage("assistant", shownFb);
+    else if (!parseFirstToolCall(fullContent)) msgEl = renderMessage("assistant", "(empty response)");
   }
 
   const cleaned = stripThink(fullContent);
   State.messages.push({ role: "assistant", content: cleaned, timestamp: Date.now() });
   State._litertMsgCursor = State.messages.length;
   saveState();
-  if (State.settings.ttsEnabled && fullContent) speakText(displayText(fullContent));
+  renderDebug("raw model output", fullContent || "(empty)");
+  // TTS only for a final answer (no tool call)
+  if (State.settings.ttsEnabled && fullContent && !parseFirstToolCall(fullContent)) {
+    speakText(displayText(fullContent));
+  }
   scrollToBottom();
   return fullContent;
 }
@@ -3477,9 +3543,7 @@ async function clearContext() {
     try {
       await State.litertConversation.delete();
       const sysPrompt = State.settings.systemPrompt || getDefaultSystemPrompt();
-      State.litertConversation = await State.litertEngine.createConversation({
-        preface: { messages: [{ role: "system", content: sysPrompt }] }
-      });
+      State.litertConversation = await createLitertConversation(State.litertEngine, sysPrompt);
     } catch(e) { console.warn("LiteRT-LM conversation reset:", e); }
   }
   State._litertMsgCursor = 0;
