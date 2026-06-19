@@ -3,324 +3,577 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Iris</title>
+  <title>Iris &mdash; In-browser Gemma 4</title>
   <style>
+    /* ===== Reset & Variables ===== */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg: #f8f9fa;
+      --bg: #f5f6f8;
       --surface: #ffffff;
-      --border: #dee2e6;
-      --text: #212529;
-      --text-muted: #6c757d;
+      --border: #dde1e6;
+      --text: #1a1d23;
+      --text-muted: #6b7280;
       --primary: #4263eb;
       --primary-hover: #3b5bdb;
-      --user-bg: #e7f5ff;
-      --assistant-bg: #f1f3f5;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --success: #16a34a;
       --font: system-ui, -apple-system, "Segoe UI", sans-serif;
-      --mono: "SF Mono", "Fira Code", "Fira Mono", monospace;
+      --mono: "SF Mono", "Fira Code", "Fira Mono", "Cascadia Code", monospace;
       --radius: 8px;
+      --sidebar-w: 260px;
+      --panel-w: 300px;
     }
 
-    body {
+    html, body {
+      height: 100%;
       font-family: var(--font);
       background: var(--bg);
       color: var(--text);
       line-height: 1.5;
-      min-height: 100vh;
+    }
+
+    /* ===== App Layout ===== */
+    .app-layout {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* -- Left sidebar -- */
+    .sidebar {
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
       display: flex;
       flex-direction: column;
-      align-items: center;
+      padding: 16px 12px;
+      gap: 12px;
+      overflow-y: auto;
     }
 
-    header {
-      width: 100%;
-      max-width: 800px;
-      padding: 24px 16px 0;
+    .sidebar-brand {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      padding: 4px 4px 8px;
+      border-bottom: 1px solid var(--border);
     }
 
-    header h1 {
-      font-size: 1.5rem;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-    }
-
-    header p {
+    .sidebar-brand small {
+      display: block;
+      font-size: 0.7rem;
+      font-weight: 400;
       color: var(--text-muted);
-      font-size: 0.875rem;
-      margin-top: 2px;
     }
 
-    main {
-      width: 100%;
-      max-width: 800px;
-      padding: 16px;
+    /* -- Center (chat area) -- */
+    .center {
       flex: 1;
       display: flex;
       flex-direction: column;
+      min-width: 0;
+    }
+
+    .top-bar {
+      height: 52px;
+      min-height: 52px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
       gap: 16px;
     }
 
-    /* -- Model loader -- */
-    .model-loader {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 16px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .model-loader select {
+    .top-bar-model {
       flex: 1;
-      min-width: 200px;
-      padding: 8px 12px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      font-size: 0.875rem;
-      background: var(--bg);
     }
 
-    button {
-      padding: 8px 18px;
-      border: none;
-      border-radius: 6px;
-      font-size: 0.875rem;
-      font-weight: 500;
+    .debug-toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
       cursor: pointer;
-      transition: background 0.15s;
+      user-select: none;
     }
 
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
+    #chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
 
-    .btn-primary {
-      background: var(--primary);
-      color: #fff;
-    }
-    .btn-primary:hover:not(:disabled) {
-      background: var(--primary-hover);
-    }
-
-    .btn-danger {
-      background: #fa5252;
-      color: #fff;
-    }
-    .btn-danger:hover:not(:disabled) {
-      background: #e03131;
-    }
-
-    progress {
-      width: 100%;
-      height: 8px;
-      border-radius: 4px;
-      appearance: none;
-    }
-    progress::-webkit-progress-bar {
-      background: var(--bg);
-      border-radius: 4px;
-    }
-    progress::-webkit-progress-value {
-      background: var(--primary);
-      border-radius: 4px;
-    }
-
-    .progress-text {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      width: 100%;
-    }
-
-    /* -- System prompt -- */
-    .system-prompt-section {
+    .composer {
+      border-top: 1px solid var(--border);
       background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 16px;
+      padding: 12px 20px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
     }
 
-    .system-prompt-section label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 500;
-      color: var(--text-muted);
-      margin-bottom: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    textarea {
-      width: 100%;
+    .composer textarea {
+      flex: 1;
+      min-height: 42px;
+      max-height: 140px;
       padding: 10px 12px;
       border: 1px solid var(--border);
       border-radius: 6px;
       font-family: var(--font);
-      font-size: 0.875rem;
+      font-size: 0.9rem;
       resize: vertical;
-      min-height: 60px;
       background: var(--bg);
     }
-    textarea:focus {
+    .composer textarea:focus {
       outline: 2px solid var(--primary);
       outline-offset: -1px;
       border-color: var(--primary);
     }
 
-    /* -- Output area -- */
-    #output-area {
+    /* -- Right panel area -- */
+    .right-panel {
+      width: var(--panel-w);
+      min-width: var(--panel-w);
       background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 16px;
-      min-height: 200px;
-      max-height: 500px;
+      border-left: 1px solid var(--border);
       overflow-y: auto;
+      padding: 16px 12px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 16px;
     }
 
+    /* ===== Buttons ===== */
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: var(--danger-hover); }
+
+    .btn-sm { padding: 5px 12px; font-size: 0.78rem; }
+
+    /* ===== Chat messages ===== */
     .msg {
       padding: 10px 14px;
       border-radius: var(--radius);
       font-size: 0.9rem;
       white-space: pre-wrap;
       word-break: break-word;
-      max-width: 85%;
+      max-width: 88%;
     }
-
     .msg-user {
-      background: var(--user-bg);
+      background: #e0edff;
       align-self: flex-end;
       border-bottom-right-radius: 2px;
     }
-
     .msg-assistant {
-      background: var(--assistant-bg);
+      background: #f1f3f5;
       align-self: flex-start;
       border-bottom-left-radius: 2px;
     }
 
-    .stats {
-      font-size: 0.75rem;
+    /* ===== Inspector (trace renderer) ===== */
+    .inspector-turn {
+      align-self: flex-start;
+      width: 100%;
+      max-width: 88%;
+    }
+
+    .inspector-summary {
+      font-size: 0.78rem;
       color: var(--text-muted);
-      text-align: center;
-      padding: 4px 0;
+      padding: 4px 0 2px;
+      font-weight: 500;
     }
 
-    /* -- Input area -- */
-    .input-area {
-      display: flex;
-      gap: 8px;
-      align-items: flex-end;
-    }
-
-    .input-area textarea {
-      flex: 1;
-      min-height: 44px;
-      max-height: 120px;
-    }
-
-    /* -- Debug -- */
-    details.debug {
-      background: var(--surface);
+    .inspector-thinking {
+      margin: 4px 0;
       border: 1px solid var(--border);
-      border-radius: var(--radius);
-      font-size: 0.8rem;
+      border-radius: 6px;
+      background: #fafbfc;
     }
-
-    details.debug summary {
-      padding: 10px 16px;
+    .inspector-thinking > summary {
+      padding: 6px 12px;
       cursor: pointer;
+      font-size: 0.82rem;
       font-weight: 500;
       color: var(--text-muted);
       user-select: none;
     }
-
-    details.debug .debug-content {
-      padding: 0 16px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+    .inspector-thinking-content {
+      padding: 8px 12px;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: #888;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 300px;
+      overflow-y: auto;
     }
 
-    .debug-section h3 {
+    .inspector-tool-call {
+      margin: 4px 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fefefe;
+    }
+    .inspector-tool-call > summary {
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--text);
+      user-select: none;
+      list-style: disclosure-closed;
+    }
+    .inspector-tool-call[open] > summary {
+      list-style: disclosure-open;
+    }
+    .inspector-tool-args {
+      padding: 8px 12px;
+      font-size: 0.78rem;
+    }
+    .inspector-tool-args pre {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      padding: 8px 10px;
+      border-radius: 4px;
+      font-family: var(--mono);
       font-size: 0.75rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 4px 0;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .inspector-tool-result {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: flex-start;
+    }
+
+    .chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .chip-ok { background: #dcfce7; color: #166534; }
+    .chip-err { background: #fecaca; color: #991b1b; }
+    .chip-time { background: #e0edff; color: #1e40af; }
+
+    .inspector-result-content {
+      width: 100%;
+      background: #f8f9fa;
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 4px;
+    }
+    .inspector-error {
+      color: #991b1b;
+    }
+
+    .inspector-content {
+      padding: 10px 14px;
+      background: #f1f3f5;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-top: 4px;
+    }
+
+    .inspector-error-msg {
+      color: var(--danger);
+      font-weight: 600;
+      margin-top: 6px;
+    }
+
+    /* -- Debug section inside inspector -- */
+    .inspector-debug {
+      margin-top: 8px;
+      padding: 8px;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      background: #f9fafb;
+    }
+    .inspector-debug h4 {
+      font-size: 0.72rem;
       font-weight: 600;
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.04em;
-      margin-bottom: 4px;
+      margin: 8px 0 4px;
     }
-
-    .debug-section pre {
+    .inspector-debug h4:first-child { margin-top: 0; }
+    .inspector-debug-pre {
       background: #1e1e2e;
       color: #cdd6f4;
-      padding: 12px;
-      border-radius: 6px;
-      overflow-x: auto;
+      padding: 8px 10px;
+      border-radius: 4px;
       font-family: var(--mono);
-      font-size: 0.75rem;
-      line-height: 1.6;
-      max-height: 300px;
-      overflow-y: auto;
+      font-size: 0.72rem;
       white-space: pre-wrap;
       word-break: break-all;
+      max-height: 250px;
+      overflow-y: auto;
+      line-height: 1.5;
+    }
+
+    /* ===== Model Manager ===== */
+    .model-manager { display: flex; flex-direction: column; gap: 8px; }
+    .model-manager-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .mm-select {
+      flex: 1;
+      min-width: 0;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 0.8rem;
+      background: var(--bg);
+    }
+    .mm-status {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      width: 100%;
+    }
+    .mm-progress-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .mm-progress-text {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+    progress {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      appearance: none;
+    }
+    progress::-webkit-progress-bar { background: var(--bg); border-radius: 3px; }
+    progress::-webkit-progress-value { background: var(--primary); border-radius: 3px; }
+
+    /* ===== Panel titles ===== */
+    .panel-title {
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    /* ===== Settings Panel ===== */
+    .settings-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .setting-label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.8rem;
+      color: var(--text);
+    }
+    .setting-label input[type="range"] {
+      width: 100%;
+    }
+    .setting-number {
+      width: 80px;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 0.82rem;
+    }
+    .setting-checkbox {
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+    }
+    .setting-textarea {
+      width: 100%;
+      min-height: 60px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: var(--font);
+      font-size: 0.82rem;
+      resize: vertical;
+      background: var(--bg);
+    }
+    .setting-textarea:focus {
+      outline: 2px solid var(--primary);
+      outline-offset: -1px;
+    }
+
+    /* ===== Storage Panel ===== */
+    .storage-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .sp-info {
+      font-size: 0.82rem;
+      color: var(--text);
+    }
+    .sp-buttons {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .sp-status {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* ===== File Manager ===== */
+    .file-manager {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .fm-toolbar {
+      display: flex;
+      gap: 6px;
+    }
+    .fm-dropzone {
+      border: 2px dashed var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .fm-dropzone.iris-drop-active {
+      border-color: var(--primary);
+      background: #eef2ff;
+    }
+    .fm-file-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .fm-file-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+    }
+    .fm-file-row:hover { background: var(--bg); }
+    .fm-file-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .fm-file-size {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .fm-dl-btn {
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+    .fm-empty {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      padding: 8px 0;
+    }
+
+    /* ===== Responsive: hide sidebar/panel on small screens ===== */
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+      .right-panel { width: 240px; min-width: 240px; }
+    }
+    @media (max-width: 700px) {
+      .right-panel { display: none; }
     }
   </style>
 </head>
 <body>
 
-  <header>
-    <h1>Iris</h1>
-    <p>In-browser Gemma 4 chat &mdash; transformers.js + WebGPU</p>
-  </header>
+<div class="app-layout">
 
-  <main>
-    <!-- Model loader -->
-    <div class="model-loader">
-      <select id="model-select" aria-label="Select model"></select>
-      <button id="load-btn" class="btn-primary">Load Model</button>
-      <progress id="progress-bar" max="100" value="0"></progress>
-      <span id="progress-text" class="progress-text"></span>
+  <!-- Left sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      Iris
+      <small>Gemma 4 &middot; In-browser</small>
+    </div>
+    <button id="new-chat-btn" class="btn-primary btn-sm" style="width:100%">New Chat</button>
+  </aside>
+
+  <!-- Center: top bar + chat + composer -->
+  <div class="center">
+    <div class="top-bar">
+      <div id="model-manager-container" class="top-bar-model"></div>
+      <label class="debug-toggle-label">
+        <input type="checkbox" id="debug-toggle">
+        Debug
+      </label>
     </div>
 
-    <!-- System prompt -->
-    <div class="system-prompt-section">
-      <label for="system-prompt">System prompt</label>
-      <textarea id="system-prompt" rows="3" placeholder="You are a helpful assistant.">You are a helpful assistant.</textarea>
+    <div id="chat-messages"></div>
+
+    <div class="composer">
+      <textarea id="chat-input" rows="1" placeholder="Type a message... (Enter to send, Shift+Enter for newline)"></textarea>
+      <button id="chat-send-btn" class="btn-primary">Send</button>
+      <button id="chat-stop-btn" class="btn-danger" style="display:none">Stop</button>
     </div>
+  </div>
 
-    <!-- Output -->
-    <div id="output-area"></div>
+  <!-- Right panel: Settings / Storage / Files -->
+  <aside class="right-panel">
+    <div id="settings-container"></div>
+    <hr style="border:none; border-top:1px solid var(--border);">
+    <div id="storage-container"></div>
+    <hr style="border:none; border-top:1px solid var(--border);">
+    <div id="file-manager-container"></div>
+  </aside>
 
-    <!-- Input -->
-    <div class="input-area">
-      <textarea id="user-input" rows="2" placeholder="Type a message..."></textarea>
-      <button id="send-btn" class="btn-primary">Send</button>
-      <button id="cancel-btn" class="btn-danger">Cancel</button>
-    </div>
+</div>
 
-    <!-- Debug -->
-    <details class="debug">
-      <summary>Debug</summary>
-      <div class="debug-content">
-        <div class="debug-section">
-          <h3>Rendered Prompt</h3>
-          <pre id="debug-prompt">(send a message to see the rendered prompt)</pre>
-        </div>
-        <div class="debug-section">
-          <h3>Tokenizer Info</h3>
-          <pre id="debug-tokenizer">(load a model to see tokenizer info)</pre>
-        </div>
-      </div>
-    </details>
-  </main>
-
-  <script type="module" src="./src/main.js"></script>
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>
