@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Iris</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f8f9fa;
+      --surface: #ffffff;
+      --border: #dee2e6;
+      --text: #212529;
+      --text-muted: #6c757d;
+      --primary: #4263eb;
+      --primary-hover: #3b5bdb;
+      --user-bg: #e7f5ff;
+      --assistant-bg: #f1f3f5;
+      --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: "SF Mono", "Fira Code", "Fira Mono", monospace;
+      --radius: 8px;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header {
+      width: 100%;
+      max-width: 800px;
+      padding: 24px 16px 0;
+    }
+
+    header h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    header p {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+      margin-top: 2px;
+    }
+
+    main {
+      width: 100%;
+      max-width: 800px;
+      padding: 16px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* -- Model loader -- */
+    .model-loader {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .model-loader select {
+      flex: 1;
+      min-width: 200px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.875rem;
+      background: var(--bg);
+    }
+
+    button {
+      padding: 8px 18px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+
+    .btn-danger {
+      background: #fa5252;
+      color: #fff;
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: #e03131;
+    }
+
+    progress {
+      width: 100%;
+      height: 8px;
+      border-radius: 4px;
+      appearance: none;
+    }
+    progress::-webkit-progress-bar {
+      background: var(--bg);
+      border-radius: 4px;
+    }
+    progress::-webkit-progress-value {
+      background: var(--primary);
+      border-radius: 4px;
+    }
+
+    .progress-text {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      width: 100%;
+    }
+
+    /* -- System prompt -- */
+    .system-prompt-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+
+    .system-prompt-section label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: var(--font);
+      font-size: 0.875rem;
+      resize: vertical;
+      min-height: 60px;
+      background: var(--bg);
+    }
+    textarea:focus {
+      outline: 2px solid var(--primary);
+      outline-offset: -1px;
+      border-color: var(--primary);
+    }
+
+    /* -- Output area -- */
+    #output-area {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      min-height: 200px;
+      max-height: 500px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .msg {
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-width: 85%;
+    }
+
+    .msg-user {
+      background: var(--user-bg);
+      align-self: flex-end;
+      border-bottom-right-radius: 2px;
+    }
+
+    .msg-assistant {
+      background: var(--assistant-bg);
+      align-self: flex-start;
+      border-bottom-left-radius: 2px;
+    }
+
+    .stats {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-align: center;
+      padding: 4px 0;
+    }
+
+    /* -- Input area -- */
+    .input-area {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+
+    .input-area textarea {
+      flex: 1;
+      min-height: 44px;
+      max-height: 120px;
+    }
+
+    /* -- Debug -- */
+    details.debug {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+    }
+
+    details.debug summary {
+      padding: 10px 16px;
+      cursor: pointer;
+      font-weight: 500;
+      color: var(--text-muted);
+      user-select: none;
+    }
+
+    details.debug .debug-content {
+      padding: 0 16px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .debug-section h3 {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 4px;
+    }
+
+    .debug-section pre {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      line-height: 1.6;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Iris</h1>
+    <p>In-browser Gemma 4 chat &mdash; transformers.js + WebGPU</p>
+  </header>
+
+  <main>
+    <!-- Model loader -->
+    <div class="model-loader">
+      <select id="model-select" aria-label="Select model"></select>
+      <button id="load-btn" class="btn-primary">Load Model</button>
+      <progress id="progress-bar" max="100" value="0"></progress>
+      <span id="progress-text" class="progress-text"></span>
+    </div>
+
+    <!-- System prompt -->
+    <div class="system-prompt-section">
+      <label for="system-prompt">System prompt</label>
+      <textarea id="system-prompt" rows="3" placeholder="You are a helpful assistant.">You are a helpful assistant.</textarea>
+    </div>
+
+    <!-- Output -->
+    <div id="output-area"></div>
+
+    <!-- Input -->
+    <div class="input-area">
+      <textarea id="user-input" rows="2" placeholder="Type a message..."></textarea>
+      <button id="send-btn" class="btn-primary">Send</button>
+      <button id="cancel-btn" class="btn-danger">Cancel</button>
+    </div>
+
+    <!-- Debug -->
+    <details class="debug">
+      <summary>Debug</summary>
+      <div class="debug-content">
+        <div class="debug-section">
+          <h3>Rendered Prompt</h3>
+          <pre id="debug-prompt">(send a message to see the rendered prompt)</pre>
+        </div>
+        <div class="debug-section">
+          <h3>Tokenizer Info</h3>
+          <pre id="debug-tokenizer">(load a model to see tokenizer info)</pre>
+        </div>
+      </div>
+    </details>
+  </main>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
