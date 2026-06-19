@@ -1,7 +1,7 @@
 /**
  * modelManager.js -- Model picker for Iris.
  *
- * Renders a model selector (E2B default, E4B), Load/Unload buttons,
+ * Renders a model selector (light UI-test models first, then Gemma 4), Load/Unload buttons,
  * download progress bar, and loaded/idle status indicator.
  *
  * Exports: createModelManager
@@ -85,7 +85,7 @@ export function createModelManager(container, { engine }) {
     opt.textContent = m.label;
     if (selectEl) selectEl.appendChild(opt);
   });
-  if (selectEl) selectEl.value = 'E2B';
+  if (selectEl) selectEl.value = MODELS[0].id;
 
   // Sync the advanced repo/dtype fields from the selected preset.
   function syncAdvanced() {

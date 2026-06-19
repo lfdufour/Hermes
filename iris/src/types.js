@@ -20,7 +20,7 @@
 
 /** dtype may be a single string (e.g. 'q4f16') or a per-module map
  *  (e.g. {embed_tokens:'fp16', decoder_model_merged:'q4f16'}).
- * @typedef {{id:'E2B'|'E4B', label:string, repo:string, dtype:(string|Object)}} ModelPreset */
+ * @typedef {{id:string, label:string, repo:string, dtype:(string|Object)}} ModelPreset */
 
 /**
  * TraceEvent (discriminated by .type):
@@ -35,15 +35,17 @@
 
 /** @typedef {{file:string, loaded:number, total:number, pct:number}} ProgressEvent */
 
-// Gemma 4 ONNX repos store each submodule separately, each at its own
-// quantization. A single dtype string makes transformers.js request that dtype
-// for ALL submodules, which 404s when a module isn't published at it. So we use
-// a per-module dtype map. The values below are VERIFIED against the actual files
-// in onnx-community/gemma-4-E2B-it-qat-mobile-ONNX/onnx (these QAT-mobile builds
-// are 2-bit: q2f16 for embed/decoder/audio, fp16 for vision). The text-only
-// causal-LM path loads only embed_tokens + decoder_model_merged (low RAM);
-// vision/audio keys apply only if the multimodal fallback path is taken.
-// If a load 404s on onnx/NAME_DTYPE.onnx, edit NAME's dtype in Model > Advanced.
+// Per-module dtype map for the split Gemma 4 layout (each submodule is a
+// separate ONNX file at its own quantization). Verified against the qat-mobile
+// repo: embed/decoder/audio are 2-bit (q2f16), vision is fp16.
+//
+// WARNING: these qat-mobile weights are 2-BIT. onnxruntime-web's quantized
+// kernels (GatherBlockQuantized etc.) only implement 4-bit and 8-bit, so the
+// 2-bit weights FAIL in-browser with:
+//   "GatherBlockQuantized ... 'bits' must be 4 or 8".
+// They run on LiteRT/MediaPipe, not onnxruntime-web. To actually run Gemma 4 in
+// the browser we need a 4-bit (q4f16) export; point repo+dtype at one via the
+// Model > Advanced panel once such a repo is identified.
 const DEFAULT_DTYPE = {
   embed_tokens: 'q2f16',
   decoder_model_merged: 'q2f16',
@@ -52,6 +54,18 @@ const DEFAULT_DTYPE = {
 };
 
 export const MODELS = [
-  { id:'E2B', label:'Gemma 4 E2B (QAT-mobile)', repo:'onnx-community/gemma-4-E2B-it-qat-mobile-ONNX', dtype:{ ...DEFAULT_DTYPE } },
-  { id:'E4B', label:'Gemma 4 E4B (QAT-mobile)', repo:'onnx-community/gemma-4-E4B-it-qat-mobile-ONNX', dtype:{ ...DEFAULT_DTYPE } },
+  // --- Light, browser-runnable models for exercising the UI end-to-end. ---
+  // Single-file ONNX (dtype is a plain STRING) using 4-bit/8-bit quantization
+  // that onnxruntime-web supports on BOTH WebGPU and WASM. The chat template
+  // and tokenizer come from each repo, so the generic loader handles them with
+  // no code changes -- only the Gemma-4-specific thinking/tool token parsing is
+  // inert on these. If a load 404s on onnx/model_DTYPE.onnx, change dtype in
+  // Model > Advanced (e.g. q4, q8, q4f16, fp16, or fp32 for the unquantized file).
+  { id:'G3-270M', label:'Gemma 3 270M-it (UI test)', repo:'onnx-community/gemma-3-270m-it-ONNX', dtype:'q4' },
+  { id:'Q25-05B', label:'Qwen2.5 0.5B-it (UI test, reliable)', repo:'onnx-community/Qwen2.5-0.5B-Instruct', dtype:'q4f16' },
+
+  // --- Full Gemma 4 (multimodal). 2-bit qat-mobile: see WARNING above; these
+  // currently do NOT run in onnxruntime-web. Kept for when a 4-bit export lands. ---
+  { id:'E2B', label:'Gemma 4 E2B (qat-mobile, 2-bit — not browser-runnable yet)', repo:'onnx-community/gemma-4-E2B-it-qat-mobile-ONNX', dtype:{ ...DEFAULT_DTYPE } },
+  { id:'E4B', label:'Gemma 4 E4B (qat-mobile, 2-bit — not browser-runnable yet)', repo:'onnx-community/gemma-4-E4B-it-qat-mobile-ONNX', dtype:{ ...DEFAULT_DTYPE } },
 ];
