@@ -18,7 +18,9 @@
 /** @typedef {{temperature:number, top_p:number, top_k?:number, max_new_tokens:number,
  *   do_sample:boolean, repetition_penalty?:number}} GenConfig */
 
-/** @typedef {{id:'E2B'|'E4B', label:string, repo:string, dtype:string}} ModelPreset */
+/** dtype may be a single string (e.g. 'q4f16') or a per-module map
+ *  (e.g. {embed_tokens:'fp16', decoder_model_merged:'q4f16'}).
+ * @typedef {{id:'E2B'|'E4B', label:string, repo:string, dtype:(string|Object)}} ModelPreset */
 
 /**
  * TraceEvent (discriminated by .type):
@@ -33,7 +35,20 @@
 
 /** @typedef {{file:string, loaded:number, total:number, pct:number}} ProgressEvent */
 
+// Gemma 4 ONNX repos store each submodule separately and do NOT publish every
+// one at the same quantization. A single 'q4f16' string makes transformers.js
+// request q4f16 for ALL submodules (incl. embed_tokens), which 404s. So we use a
+// per-module dtype map. These defaults follow the common onnx-community layout;
+// if a load 404s on onnx/NAME_DTYPE.onnx, edit the dtype for NAME in the UI
+// (Model > Advanced) to a quantization that actually exists in the repo.
+const DEFAULT_DTYPE = {
+  embed_tokens: 'fp16',
+  vision_encoder: 'fp16',
+  audio_encoder: 'fp16',
+  decoder_model_merged: 'q4f16',
+};
+
 export const MODELS = [
-  { id:'E2B', label:'Gemma 4 E2B (QAT-mobile)', repo:'onnx-community/gemma-4-E2B-it-qat-mobile-ONNX', dtype:'q4f16' },
-  { id:'E4B', label:'Gemma 4 E4B (QAT-mobile)', repo:'onnx-community/gemma-4-E4B-it-qat-mobile-ONNX', dtype:'q4f16' },
+  { id:'E2B', label:'Gemma 4 E2B (QAT-mobile)', repo:'onnx-community/gemma-4-E2B-it-qat-mobile-ONNX', dtype:{ ...DEFAULT_DTYPE } },
+  { id:'E4B', label:'Gemma 4 E4B (QAT-mobile)', repo:'onnx-community/gemma-4-E4B-it-qat-mobile-ONNX', dtype:{ ...DEFAULT_DTYPE } },
 ];
