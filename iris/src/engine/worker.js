@@ -35,6 +35,33 @@ function post(id, type, payload) {
   self.postMessage({ id, type, payload });
 }
 
+/**
+ * Resolve the ONNX execution backend.
+ *
+ * The Gemma 4 QAT-mobile weights are f16-only (q2f16 / fp16). WebGPU can run
+ * f16 models ONLY when the adapter exposes the 'shader-f16' feature; on GPUs or
+ * browsers without it, transformers.js throws
+ *   "The device (webgpu) does not support fp16".
+ * So for 'auto' we probe the adapter and fall back to 'wasm' (CPU) when f16
+ * isn't available. WASM runs f16 weights fine -- slower, but it works anywhere.
+ *
+ *  - 'wasm' / 'cpu' : force CPU.
+ *  - 'webgpu'       : force WebGPU (may fail on devices without shader-f16).
+ *  - 'auto' (default): WebGPU iff shader-f16 is supported, else WASM.
+ */
+async function resolveDevice(requested) {
+  const want = requested || 'auto';
+  if (want === 'wasm' || want === 'cpu') return 'wasm';
+  if (want === 'webgpu') return 'webgpu';
+  try {
+    if (typeof navigator !== 'undefined' && navigator.gpu) {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (adapter && adapter.features.has('shader-f16')) return 'webgpu';
+    }
+  } catch (_) { /* fall through to wasm */ }
+  return 'wasm';
+}
+
 // ---------- Operations ----------
 
 /**
@@ -48,13 +75,16 @@ function post(id, type, payload) {
  *
  * This try/fallback is THE SINGLE SEAM to change the model loading strategy.
  */
-async function loadModel(id, { repo, dtype = 'q4f16', device = 'webgpu' }) {
+async function loadModel(id, { repo, dtype = 'q4f16', device = 'auto' }) {
   // Unload previous model if any
   if (model) {
     model = null;
     tokenizer = null;
     currentRepo = null;
   }
+
+  // Pick a backend that can actually run these f16-only weights.
+  const dev = await resolveDevice(device);
 
   const progressCallback = (progress) => {
     // transformers.js progress events have { status, file, progress, loaded, total, ... }
@@ -77,7 +107,7 @@ async function loadModel(id, { repo, dtype = 'q4f16', device = 'webgpu' }) {
   try {
     model = await AutoModelForCausalLM.from_pretrained(repo, {
       dtype,
-      device,
+      device: dev,
       progress_callback: progressCallback,
     });
   } catch (e) {
@@ -85,13 +115,13 @@ async function loadModel(id, { repo, dtype = 'q4f16', device = 'webgpu' }) {
     // but we never pass image inputs so only text generation is exercised.
     model = await AutoModelForImageTextToText.from_pretrained(repo, {
       dtype,
-      device,
+      device: dev,
       progress_callback: progressCallback,
     });
   }
 
   currentRepo = repo;
-  post(id, 'loaded', {});
+  post(id, 'loaded', { device: dev });
 }
 
 /**

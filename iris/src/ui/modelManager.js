@@ -51,9 +51,18 @@ export function createModelManager(container, { engine }) {
         <label class="mm-field">dtype (string or JSON map)
           <input id="mm-dtype" type="text" class="mm-input" spellcheck="false">
         </label>
+        <label class="mm-field">Backend
+          <select id="mm-device" class="mm-input">
+            <option value="auto">Auto (WebGPU if f16-capable, else CPU)</option>
+            <option value="webgpu">WebGPU (force)</option>
+            <option value="wasm">WASM / CPU (force)</option>
+          </select>
+        </label>
         <div class="mm-hint">If a load fails with <code>Could not locate file …/onnx/NAME_DTYPE.onnx</code>,
-          set NAME in the JSON above to a dtype that exists (e.g. <code>q4</code>, <code>q8</code>,
-          <code>fp16</code>, <code>q4f16</code>), then Load again.</div>
+          set NAME in the JSON above to a dtype that exists (e.g. <code>q2f16</code>, <code>q4f16</code>,
+          <code>fp16</code>), then Load again. These weights are f16-only; on a GPU without the
+          <code>shader-f16</code> feature WebGPU reports <code>does not support fp16</code> — Auto then
+          falls back to the (slower) CPU backend.</div>
       </details>
     </div>
   `;
@@ -67,6 +76,7 @@ export function createModelManager(container, { engine }) {
   const progressText = container.querySelector('#mm-progress-text');
   const repoEl = container.querySelector('#mm-repo');
   const dtypeEl = container.querySelector('#mm-dtype');
+  const deviceEl = container.querySelector('#mm-device');
 
   // Populate model options
   MODELS.forEach(m => {
@@ -91,7 +101,7 @@ export function createModelManager(container, { engine }) {
   if (selectEl) selectEl.addEventListener('change', syncAdvanced);
   syncAdvanced();
 
-  // Resolve the repo + dtype to load from, preferring the advanced fields.
+  // Resolve the repo + dtype + backend to load from, preferring the advanced fields.
   function resolveLoadConfig(preset) {
     const repo = (repoEl && repoEl.value.trim()) || preset.repo;
     let dtype = preset.dtype;
@@ -100,7 +110,8 @@ export function createModelManager(container, { engine }) {
       try { dtype = raw.startsWith('{') ? JSON.parse(raw) : raw; }
       catch (_) { dtype = raw; } // fall back to the literal string
     }
-    return { repo, dtype };
+    const device = (deviceEl && deviceEl.value) || 'auto';
+    return { repo, dtype, device };
   }
 
   function notifyListeners() {
@@ -133,13 +144,13 @@ export function createModelManager(container, { engine }) {
       if (progressBar) progressBar.value = 0;
       if (progressText) progressText.textContent = 'Starting download...';
 
-      const { repo, dtype } = resolveLoadConfig(preset);
+      const { repo, dtype, device } = resolveLoadConfig(preset);
 
       try {
-        await engine.load({
+        const res = await engine.load({
           repo,
           dtype,
-          device: 'webgpu',
+          device,
           onProgress: ({ file, loaded: loadedBytes, total, pct }) => {
             if (progressBar) progressBar.value = pct;
             if (progressText) {
@@ -152,7 +163,8 @@ export function createModelManager(container, { engine }) {
 
         loaded = true;
         currentModelId = preset.id;
-        setStatus(`Loaded: ${preset.label}`);
+        const backend = res && res.device ? ` · ${res.device}` : '';
+        setStatus(`Loaded: ${preset.label}${backend}`);
         loadBtn.style.display = 'none';
         if (unloadBtn) unloadBtn.style.display = 'inline-block';
         showProgress(false);
