@@ -147,10 +147,20 @@ run({ messages, tools, genConfig, onTrace, signal }) -> finalMessage
 `content_delta`, `tool_call` (name, args), `tool_result` (value, ms), `step_done`
 (tokens, tokens/sec), `turn_done`. Both raw and cleaned message histories are retained.
 
-**`ui/`** — chat pane + **Inspector/Trace** pane rendering the timeline above (collapsible thinking,
-pretty-printed tool args/results, the verbatim rendered prompt, raw-token toggle, timings) + model
-manager (pick E2B/E4B, load/unload, progress) + storage panel + file manager (browse OPFS,
-upload/download) + settings (temperature, top_p, max_new_tokens, thinking on/off, system prompt).
+**`ui/`** — chat pane + **Inspector/Trace** pane rendering the timeline above + model manager (pick
+E2B/E4B, load/unload, progress) + storage panel + file manager (browse OPFS, upload/download) +
+settings (temperature, top_p, max_new_tokens, thinking on/off, system prompt).
+
+**Inspector layout** (modeled on the Unsloth Studio trace, extended for debugging): inline under each
+user message, in generation order —
+- a per-turn summary line (e.g. *"3 tool calls"*);
+- a collapsible **Thinking** block per turn, streaming the model's thought channel live;
+- one line per tool call (`Used tool: NAME(args…)`) that **expands (chevron)** to show the full
+  arguments and the returned result as chips/cards (for file tools: path + content preview);
+- the final answer.
+A **Debug** toggle additionally reveals the verbatim rendered prompt sent to the model, a raw-token
+view, and per-step timings + tokens/sec. The renderer is tool-agnostic, so any registered tool (file
+ops now; search/others later) displays in the same expandable style.
 
 ## Conversation / message model
 
