@@ -470,7 +470,7 @@
       <div id="input-bar">
         <div id="input-row">
           <button id="btn-voice" class="btn-icon" title="Push to talk (hold)" style="display:none">🎤</button>
-          <button id="btn-think" class="btn-icon" title="Thinking mode (Qwen3 only)" aria-pressed="false" disabled>💭</button>
+          <button id="btn-think" class="btn-icon" title="Thinking mode (Qwen3 · Gemma 4)" aria-pressed="false" disabled>💭</button>
           <textarea id="chat-input" rows="1" placeholder="Message Hermes… (Enter to send, Shift+Enter for newline)"></textarea>
           <button id="btn-stop" class="btn btn-danger" style="display:none" title="Stop generation">■ Stop</button>
           <button id="btn-send" class="btn btn-primary btn-send" title="Send" aria-label="Send" disabled>
@@ -487,7 +487,7 @@
         <div id="status-line">
           <span id="status-text" class="text-muted">Load a model to start chatting</span>
           <span id="token-counter" class="text-muted" style="display:none"></span>
-          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b22 · 2026-06-19 · mobile</span>
+          <span id="app-version" class="text-muted" style="margin-left:auto" title="Build date — if this looks old after an update, hard-refresh or open in a private tab">b23 · 2026-06-19 · mobile</span>
         </div>
       </div>
     </div>
@@ -865,6 +865,8 @@ const State = {
   litertEngine: null,      // LiteRT-LM Engine instance
   litertConversation: null, // LiteRT-LM Conversation instance
   litertLoading: false,
+  _litertMsgCursor: 0,     // index into State.messages — tracks what LiteRT-LM has seen
+  _litertThinkActive: false, // whether the live LiteRT conversation was built with reasoning on
   isRecording: false,
   mediaRecorder: null,
   audioChunks: [],
@@ -999,7 +1001,10 @@ function updateTopbar() {
 
   const dotM = document.getElementById("dot-model");
   const lblM = document.getElementById("label-model");
-  if (State.activeModelId) {
+  if (State.litertEngine) {
+    dotM.className = "dot dot-green";
+    lblM.textContent = "Gemma 4 E2B";
+  } else if (State.activeModelId) {
     dotM.className = "dot dot-green";
     const short = State.activeModelId.replace(/-q[0-9].*/, "").replace(/-MLC.*/, "");
     lblM.textContent = short;
@@ -1510,7 +1515,7 @@ function requestStop() {
 
 function updateSendButton() {
   const input = document.getElementById("chat-input");
-  const hasModel = !!State.activeModelId || !!State.settings.activeCloudModelId;
+  const hasModel = !!State.activeModelId || !!State.settings.activeCloudModelId || !!State.litertEngine;
   const hasText = input.value.trim().length > 0;
   const busy = !!State._generating;
 
@@ -1536,8 +1541,8 @@ function updateSendButton() {
   } else if (busy) {
     statusEl.textContent = State.language === "fr" ? "Génération en cours…" : "Generating…";
   } else {
-    const modelLabel = State.activeModelId
-      ? State.activeModelId.replace(/-q[0-9].*/, "")
+    const modelLabel = State.litertEngine ? "Gemma 4 E2B (LiteRT-LM)"
+      : State.activeModelId ? State.activeModelId.replace(/-q[0-9].*/, "")
       : State.settings.cloudModels.find(m => m.id === State.settings.activeCloudModelId)?.label || "";
     statusEl.textContent = State.language === "fr" ? `Modèle actif : ${modelLabel}` : `Active model: ${modelLabel}`;
   }
@@ -1553,7 +1558,7 @@ function updateThinkingToggle() {
   btn.classList.toggle("active", on);
   btn.setAttribute("aria-pressed", on ? "true" : "false");
   btn.title = !supported
-    ? "Thinking mode — only Qwen3 models support it"
+    ? "Thinking mode — supported by Qwen3 and Gemma 4 (LiteRT-LM)"
     : (on ? "Thinking mode: ON — tap to turn off" : "Thinking mode: OFF — tap to turn on");
 }
 
@@ -1806,12 +1811,15 @@ async function maybeAutoSearch(userText) {
   return capped;
 }
 
-// Native thinking is a Qwen3-family feature (the only such models in the catalog).
+// Native thinking is supported by Qwen3-family models (text /think switch) and
+// by Gemma 4 via the experimental LiteRT-LM engine (reasoning channel, toggled
+// by rebuilding the conversation with a <|think|> preface). Cloud models aren't
+// controlled this way.
 function modelSupportsThinking(modelId) {
   return !!modelId && /qwen3/i.test(modelId);
 }
 function activeModelSupportsThinking() {
-  // Only a locally-loaded Qwen3 model; cloud models aren't controlled this way.
+  if (State.litertEngine) return true;  // Gemma 4 E2B via LiteRT-LM
   return !State.settings.activeCloudModelId && modelSupportsThinking(State.activeModelId);
 }
 
@@ -1957,9 +1965,118 @@ async function generateLocalTurn(typingId) {
 }
 
 // ── LiteRT-LM EXPERIMENTAL BACKEND ────────────────────────────
-// Isolated proof-of-concept: Gemma 4 E2B via Google LiteRT-LM.
-// Does not integrate with the agentic tool loop or buildMessages.
+// Experimental: Gemma 4 E2B via Google LiteRT-LM, wired into the agentic
+// tool loop. Gemma 4 supports NATIVE structured tool-calling (preface.tools
+// as JSON Schema; tool_calls on response Messages), so we register the Hermes
+// tools natively AND keep the text protocol in the system prompt as a fallback.
 const LITERT_MODEL_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm";
+
+// JSON-Schema tool definitions for LiteRT-LM's native function calling
+// (Preface.tools). Names/args mirror dispatchTool() exactly.
+function litertToolSchemas() {
+  const str = (desc) => ({ type: "string", description: desc });
+  return [
+    { name: "web_search", description: "Search the web for live/real-time information.",
+      parameters: { type: "object", properties: { query: str("Search query") }, required: ["query"] } },
+    { name: "fetch_url", description: "Fetch and extract text from a URL.",
+      parameters: { type: "object", properties: { url: str("URL to fetch") }, required: ["url"] } },
+    { name: "set_language", description: "Change the UI language.",
+      parameters: { type: "object", properties: { lang: { type: "string", enum: ["en", "fr"] } }, required: ["lang"] } },
+    { name: "set_model", description: "Switch the active model.",
+      parameters: { type: "object", properties: { id: str("Model id") }, required: ["id"] } },
+    { name: "clear_context", description: "Clear the conversation history.",
+      parameters: { type: "object", properties: {} } },
+    { name: "remember", description: "Save a fact to the memory store.",
+      parameters: { type: "object", properties: { text: str("Text to remember") }, required: ["text"] } },
+    { name: "recall", description: "Search the memory store.",
+      parameters: { type: "object", properties: { query: str("What to recall") }, required: ["query"] } },
+    { name: "calculate", description: "Safely evaluate a math expression.",
+      parameters: { type: "object", properties: { expr: str("Math expression") }, required: ["expr"] } },
+    { name: "current_datetime", description: "Get the current date and time.",
+      parameters: { type: "object", properties: {} } },
+  ];
+}
+
+// Gemma 4 reasoning is enabled by prefixing the system prompt with this control
+// token; absent, E2B emits no reasoning at all. LiteRT-LM 0.13.1 exposes NO API
+// flag for this (verified against the typedefs) — the preface token is the only
+// lever. If the eval shows a different literal is needed, change it here.
+const GEMMA_THINK_TOKEN = "<|think|>";
+
+// Create a LiteRT-LM conversation with native tool registration. The
+// preface.tools field is in the official 0.13.1 typedefs but undocumented in
+// the early-preview README, so register best-effort: if it throws, retry with
+// messages only (text-protocol tools in the system prompt still work).
+//
+// opts.thinking → prefix the system prompt with GEMMA_THINK_TOKEN to turn on
+//   Gemma 4 reasoning. opts.history → prior turns (final-answers-only) replayed
+//   into the preface so a rebuilt conversation keeps its context.
+// filterChannelContentFromKvCache keeps prior reasoning out of the KV cache, so
+// stale thoughts don't pollute multi-turn context (mirrors the Qwen3 handling).
+async function createLitertConversation(engine, sysPrompt, opts = {}) {
+  const { thinking = false, history = [] } = opts;
+  const sys = thinking ? GEMMA_THINK_TOKEN + "\n" + sysPrompt : sysPrompt;
+  const messages = [{ role: "system", content: sys }, ...history];
+  const base = { preface: { messages }, filterChannelContentFromKvCache: true };
+  try {
+    return await engine.createConversation({
+      ...base, preface: { messages, tools: litertToolSchemas() }
+    });
+  } catch (e) {
+    console.warn("LiteRT-LM native tools unsupported, falling back to text protocol:", e);
+    return await engine.createConversation(base);
+  }
+}
+
+// Final-answers-only replay of the visible conversation, used to re-seed a fresh
+// LiteRT-LM context when reasoning is toggled (LiteRT bakes the system prompt
+// into the preface at creation time, so toggling means rebuilding). User turns
+// are kept verbatim; assistant turns are reduced to their displayed answer
+// (tool-call / think machinery stripped); tool-result carriers and empty
+// tool-only turns are dropped. Consecutive same-role turns are coalesced so the
+// preface stays cleanly alternating for Gemma's chat template.
+function litertReplayMessages(msgs) {
+  const out = [];
+  const add = (role, content) => {
+    if (!content || !content.trim()) return;
+    const last = out[out.length - 1];
+    if (last && last.role === role) last.content += "\n\n" + content;
+    else out.push({ role, content });
+  };
+  for (const m of msgs) {
+    if (m.role === "user" && !m._isTool) add("user", m.content);
+    else if (m.role === "assistant") add("assistant", displayText(m.content));
+  }
+  return out;
+}
+
+// Rebuild the LiteRT conversation with reasoning on/off, replaying everything the
+// current conversation had already seen (slice up to the cursor) as preface
+// history. The cursor is left untouched so any pending (unsent) user message is
+// still delivered by generateLitertTurn afterward.
+async function rebuildLitertConversation(thinking) {
+  const engine = State.litertEngine;
+  if (!engine) return;
+  const statusEl = document.getElementById("litert-status");
+  if (statusEl) {
+    statusEl.textContent = thinking ? "Enabling reasoning…" : "Disabling reasoning…";
+    statusEl.style.color = "var(--text-muted)";
+  }
+  // Build the replacement BEFORE discarding the old one, so a failure here leaves
+  // the working conversation untouched.
+  const sysPrompt = State.settings.systemPrompt || getDefaultSystemPrompt();
+  const history = litertReplayMessages(State.messages.slice(0, State._litertMsgCursor));
+  const next = await createLitertConversation(engine, sysPrompt, { thinking, history });
+  const old = State.litertConversation;
+  State.litertConversation = next;
+  State._litertThinkActive = thinking;
+  try { if (old) await old.delete(); }
+  catch (e) { console.warn("LiteRT old conversation delete (rebuild):", e); }
+  if (statusEl) {
+    statusEl.textContent = "Gemma 4 E2B ready (LiteRT-LM)";
+    statusEl.style.color = "var(--accent)";
+  }
+}
 
 async function loadLitertEngine() {
   if (State.litertLoading || State.litertEngine) return;
@@ -1983,31 +2100,54 @@ async function loadLitertEngine() {
     const { Engine } = await import("https://cdn.jsdelivr.net/npm/@litert-lm/core@0.13.1/+esm");
 
     progText.textContent = "Downloading Gemma 4 E2B model (~2 GB)...";
-    progBar.style.width = "15%";
+    progBar.style.width = "0%";
 
-    // Engine.create fetches and loads the model internally.
-    // There is no progress callback in the current API, so we show an
-    // indeterminate-style update.
-    const engine = await Engine.create({ model: LITERT_MODEL_URL });
+    // Fetch the model ourselves so we can track download progress.
+    // Engine.create accepts a ReadableStream for the model property.
+    const resp = await fetch(LITERT_MODEL_URL);
+    if (!resp.ok) throw new Error(`Model fetch failed: ${resp.status}`);
+    const totalBytes = parseInt(resp.headers.get("content-length") || "0", 10);
+    let receivedBytes = 0;
+    const trackingStream = resp.body.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        receivedBytes += chunk.byteLength;
+        if (totalBytes > 0) {
+          const pct = Math.min(85, (receivedBytes / totalBytes) * 85);
+          progBar.style.width = pct + "%";
+          const mb = (receivedBytes / 1048576).toFixed(0);
+          const totalMb = (totalBytes / 1048576).toFixed(0);
+          progText.textContent = `Downloading Gemma 4 E2B... ${mb} / ${totalMb} MB`;
+        } else {
+          const mb = (receivedBytes / 1048576).toFixed(0);
+          progText.textContent = `Downloading Gemma 4 E2B... ${mb} MB`;
+        }
+        controller.enqueue(chunk);
+      }
+    }));
+
+    progText.textContent = "Loading model into engine...";
+    progBar.style.width = "85%";
+    const engine = await Engine.create({ model: trackingStream });
     progBar.style.width = "90%";
 
     progText.textContent = "Creating conversation...";
-    const conversation = await engine.createConversation({
-      preface: {
-        messages: [{ role: "system", content: State.settings.systemPrompt || "You are a helpful assistant." }]
-      }
-    });
+    const sysPrompt = State.settings.systemPrompt || getDefaultSystemPrompt();
+    const thinking = State.settings.thinkingEnabled;
+    const conversation = await createLitertConversation(engine, sysPrompt, { thinking });
     progBar.style.width = "100%";
 
     State.litertEngine = engine;
     State.litertConversation = conversation;
+    State._litertMsgCursor = State.messages.length;
+    State._litertThinkActive = thinking;
 
     btn.textContent = "Unload Gemma 4 E2B";
     btn.disabled = false;
     prog.style.display = "none";
     statusEl.textContent = "Gemma 4 E2B ready (LiteRT-LM)";
     statusEl.style.color = "var(--accent)";
-    document.getElementById("status-text").textContent = "Gemma 4 E2B (LiteRT-LM) active";
+    updateSendButton();
+    updateTopbar();
   } catch (e) {
     console.error("LiteRT-LM load error:", e);
     prog.style.display = "none";
@@ -2035,13 +2175,15 @@ async function unloadLitertEngine() {
   } catch(e) { console.warn("LiteRT engine delete:", e); }
   State.litertEngine = null;
   State.litertConversation = null;
+  State._litertMsgCursor = 0;
 
   const btn = document.getElementById("btn-load-litert");
   const statusEl = document.getElementById("litert-status");
   btn.textContent = "Load Gemma 4 E2B (LiteRT-LM)";
   btn.disabled = false;
   statusEl.textContent = "";
-  document.getElementById("status-text").textContent = "Load a model to start chatting";
+  updateSendButton();
+  updateTopbar();
 }
 
 /** Stream a response from LiteRT-LM Gemma 4 E2B into the chat */
@@ -2052,14 +2194,40 @@ async function generateLitertTurn(typingId) {
     return "";
   }
 
+  // Reasoning toggle: LiteRT bakes the system prompt into the preface at creation
+  // time, so honoring a flipped thinking toggle means rebuilding the conversation
+  // (replaying prior turns as final-answers-only context). Done lazily here — just
+  // before sending — so the toggle click itself stays instant. The cursor is left
+  // alone, so the pending user message below is still delivered.
+  if (State.settings.thinkingEnabled !== State._litertThinkActive) {
+    try { await rebuildLitertConversation(State.settings.thinkingEnabled); }
+    catch (e) {
+      console.error("LiteRT reasoning rebuild failed:", e);
+      addSystemMsg("Couldn't switch reasoning mode (continuing as-is): " + (e.message || e), "error");
+    }
+  }
+
+  // LiteRT-LM maintains its own conversation history. We use _litertMsgCursor
+  // to track which State.messages have already been sent. Gather all new
+  // user-role messages (original question, auto-search results, tool results)
+  // and concatenate them into one user turn.
+  const pending = State.messages.slice(State._litertMsgCursor)
+    .filter(m => m.role === "user")
+    .map(m => m.content);
+  const textToSend = pending.join("\n\n");
+  if (!textToSend) {
+    removeTypingIndicator(typingId);
+    return "";
+  }
+  renderDebug("prompt → Gemma 4 E2B (LiteRT-LM)", textToSend.slice(0, 500));
+
   let fullContent = "";
   let msgEl = null;
+  const nativeToolCalls = [];   // collected from chunk.tool_calls (Gemma 4 native)
+  const channelsAcc = {};       // accumulated reasoning channels (Gemma 4 "thought")
+  let loggedShape = false, loggedChannels = false;  // one-shot eval diagnostics
 
-  // The LiteRT-LM Conversation maintains its own history, so we only
-  // send the latest user message. A plain string is auto-wrapped as
-  // { role: "user", content: text } by the library.
-  const lastUserMsg = [...State.messages].reverse().find(m => m.role === "user");
-  const stream = State.litertConversation.sendMessageStreaming(lastUserMsg?.content || "");
+  const stream = State.litertConversation.sendMessageStreaming(textToSend);
   const reader = stream.getReader();
 
   try {
@@ -2067,15 +2235,47 @@ async function generateLitertTurn(typingId) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      // Each chunk is a Message: { role, content } where content is
-      // string | Array<{ type, text }>
+      // Text content: a chunk's content is string | Array<{type,text}>.
+      // Iterate ALL items (not just [0]) and keep only text parts.
       let delta = "";
       if (value && typeof value.content === "string") {
         delta = value.content;
-      } else if (value?.content?.[0]?.text) {
-        delta = value.content[0].text;
+      } else if (Array.isArray(value?.content)) {
+        for (const item of value.content) {
+          if (item && item.type === "text" && item.text) delta += item.text;
+        }
       }
       fullContent += delta;
+
+      // Native structured tool calls arrive on a separate field.
+      if (Array.isArray(value?.tool_calls)) {
+        for (const tc of value.tool_calls) nativeToolCalls.push(tc);
+      }
+
+      // Reasoning surfaces on a separate channel (Message.channels), kept out of
+      // the KV cache by filterChannelContentFromKvCache. Accumulate it per key.
+      if (value && value.channels && typeof value.channels === "object") {
+        for (const [k, v] of Object.entries(value.channels)) {
+          if (typeof v === "string" && v) channelsAcc[k] = (channelsAcc[k] || "") + v;
+        }
+      }
+
+      // One-shot diagnostics so a browser eval reveals the real chunk shape —
+      // resolves how Gemma's thought is delivered (structured channel vs inline).
+      if (!loggedShape) {
+        loggedShape = true;
+        try {
+          renderDebug("litert chunk shape", JSON.stringify({
+            keys: value ? Object.keys(value) : [],
+            contentType: Array.isArray(value?.content) ? "array" : typeof value?.content,
+            hasChannels: !!(value && value.channels),
+          }));
+        } catch (_) {}
+      }
+      if (!loggedChannels && value?.channels && Object.keys(value.channels).length) {
+        loggedChannels = true;
+        try { renderDebug("litert channel keys", JSON.stringify(Object.keys(value.channels))); } catch (_) {}
+      }
 
       const shown = displayText(fullContent);
       if (!msgEl && shown) {
@@ -2091,18 +2291,43 @@ async function generateLitertTurn(typingId) {
     addSystemMsg("LiteRT-LM generation error: " + e.message, "error");
   }
 
-  if (!msgEl) {
-    removeTypingIndicator(typingId);
-    if (fullContent.trim()) {
-      msgEl = renderMessage("assistant", displayText(fullContent) || fullContent);
-    } else {
-      msgEl = renderMessage("assistant", "(empty response)");
+  // Bridge native tool calls into the text protocol the agentic loop expects:
+  // append a ```tool_call block so parseFirstToolCall() picks it up unchanged.
+  if (nativeToolCalls.length && !parseFirstToolCall(fullContent)) {
+    const fn = nativeToolCalls[0].function || {};
+    let args = fn.arguments;
+    if (typeof args === "string") { try { args = JSON.parse(args); } catch(_) { args = {}; } }
+    if (fn.name) {
+      fullContent += "\n\n```tool_call\n" +
+        JSON.stringify({ tool: fn.name, args: args || {} }) + "\n```";
     }
   }
 
-  State.messages.push({ role: "assistant", content: fullContent, timestamp: Date.now() });
+  if (!msgEl) {
+    removeTypingIndicator(typingId);
+    // Don't render a bubble for a tool-call-only turn — the loop shows the
+    // tool chip separately. Match generateLocalTurn's behavior exactly.
+    const shownFb = displayText(fullContent) || thinkFallback(fullContent);
+    if (shownFb) msgEl = renderMessage("assistant", shownFb);
+    else if (!parseFirstToolCall(fullContent)) msgEl = renderMessage("assistant", "(empty response)");
+  }
+
+  const cleaned = stripThink(fullContent);
+  State.messages.push({ role: "assistant", content: cleaned, timestamp: Date.now() });
+  State._litertMsgCursor = State.messages.length;
   saveState();
-  if (State.settings.ttsEnabled && fullContent) speakText(displayText(fullContent));
+  // Reasoning is debug-only (like Qwen3): never shown in the bubble or stored.
+  const thought = channelsAcc.thought || channelsAcc.thinking || channelsAcc.reasoning;
+  if (thought && thought.trim()) renderDebug("💭 thinking", thought.trim());
+  const otherCh = Object.keys(channelsAcc).filter(k => !/^(thought|thinking|reasoning)$/i.test(k));
+  if (otherCh.length) {
+    try { renderDebug("litert other channels", JSON.stringify(otherCh.reduce((o,k)=>(o[k]=channelsAcc[k],o),{}))); } catch(_){}
+  }
+  renderDebug("raw model output", fullContent || "(empty)");
+  // TTS only for a final answer (no tool call)
+  if (State.settings.ttsEnabled && fullContent && !parseFirstToolCall(fullContent)) {
+    speakText(displayText(fullContent));
+  }
   scrollToBottom();
   return fullContent;
 }
@@ -2406,7 +2631,7 @@ async function generateOneTurn(existingTypingId) {
 
   try {
     // LiteRT-LM path: when the experimental engine is active, use it
-    // instead of WebLLM or cloud. Does not enter the agentic tool loop.
+    // instead of WebLLM or cloud.
     if (State.litertEngine) {
       content = await generateLitertTurn(typingId);
     } else if (State.activeModelId && State.engine) {
@@ -3427,10 +3652,19 @@ function speakText(text) {
 }
 
 // ── CONTEXT MANAGEMENT ────────────────────────────────────────
-function clearContext() {
+async function clearContext() {
   State.messages = [];
   document.getElementById("messages").innerHTML = "";
   document.getElementById("token-counter").style.display = "none";
+  // Reset LiteRT-LM conversation so it starts fresh
+  if (State.litertEngine && State.litertConversation) {
+    try {
+      await State.litertConversation.delete();
+      const sysPrompt = State.settings.systemPrompt || getDefaultSystemPrompt();
+      State.litertConversation = await createLitertConversation(State.litertEngine, sysPrompt);
+    } catch(e) { console.warn("LiteRT-LM conversation reset:", e); }
+  }
+  State._litertMsgCursor = 0;
   saveState();
   addSystemMsg(State.language === "fr" ? "Contexte effacé." : "Context cleared.");
   logAction("info", "clear_context", "Conversation context cleared");
