@@ -10,13 +10,14 @@ import { MODELS, DEFAULT_MODEL_ID, getModel } from '../engine/models.js';
 import { renderCasesView } from './casesView.js';
 import { renderStep1View } from './step1View.js';
 import { renderStep2View } from './step2View.js';
+import { createDebugPanel } from './debugPanel.js';
 
 /**
  * Initialize the application UI.
  *
  * @param {{ engine: object, infer: object, casesStore: object }} deps
  */
-export function initApp({ engine, infer, casesStore }) {
+export function initApp({ engine, infer, casesStore, debugLog }) {
   const navContainer = document.getElementById('nav-tabs');
   const modelBar = document.getElementById('model-bar');
   const mainContent = document.getElementById('main-content');
@@ -27,6 +28,9 @@ export function initApp({ engine, infer, casesStore }) {
   let currentCase = null;
   let modelLoaded = false;
   let modelLoading = false;
+  // The currently-rendered view can register a hook here so it is notified live
+  // when the model finishes loading/unloading (its action buttons gate on this).
+  let modelStateHook = null;
 
   // ===== Model Bar =====
   /** Render the model selection + load controls. */
@@ -99,6 +103,8 @@ export function initApp({ engine, infer, casesStore }) {
           if (unloadBtn) unloadBtn.style.display = 'inline-block';
           if (progressWrap) progressWrap.style.display = 'none';
           updateNavState();
+          // Notify the live view so its (already-rendered) action button enables.
+          if (modelStateHook) modelStateHook(true);
         } catch (err) {
           if (statusEl) statusEl.textContent = 'Error: ' + err.message;
           console.error('[Hermes] Model load failed:', err);
@@ -125,6 +131,7 @@ export function initApp({ engine, infer, casesStore }) {
         if (unloadBtn) unloadBtn.style.display = 'none';
         if (loadBtn) loadBtn.style.display = 'inline-block';
         updateNavState();
+        if (modelStateHook) modelStateHook(false);
       });
     }
   }
@@ -191,6 +198,8 @@ export function initApp({ engine, infer, casesStore }) {
   function renderView(opts) {
     if (!mainContent) return;
     mainContent.innerHTML = '';
+    // Drop any hook registered by the previous view before rendering the next.
+    modelStateHook = null;
 
     const container = document.createElement('div');
     container.className = 'view-container';
@@ -227,6 +236,7 @@ export function initApp({ engine, infer, casesStore }) {
           casesStore,
           currentCase,
           modelLoaded,
+          registerModelHook: (fn) => { modelStateHook = fn; },
           tableReady: opts && opts.tableReady,
           onCaseUpdated: (updatedCase) => {
             currentCase = updatedCase;
@@ -245,6 +255,7 @@ export function initApp({ engine, infer, casesStore }) {
           casesStore,
           currentCase,
           modelLoaded,
+          registerModelHook: (fn) => { modelStateHook = fn; },
           onCaseUpdated: (updatedCase) => {
             currentCase = updatedCase;
           },
@@ -260,4 +271,11 @@ export function initApp({ engine, infer, casesStore }) {
   renderModelBar();
   renderNav();
   renderView();
+
+  // Debug inspector: toggle button in the top bar + slide-in drawer.
+  if (debugLog) {
+    const { toggleButton } = createDebugPanel({ debugLog });
+    const topBar = document.querySelector('.top-bar');
+    if (topBar && toggleButton) topBar.appendChild(toggleButton);
+  }
 }

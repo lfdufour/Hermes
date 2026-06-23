@@ -10,12 +10,16 @@ import { EngineClient } from '../../iris/src/engine/client.js';
 import { createInference } from './engine/infer.js';
 import { casesStore } from './store/cases.js';
 import { initApp } from './ui/app.js';
+import { createDebugLog } from './ui/debugPanel.js';
 
 async function boot() {
   // NOTE: EngineClient spawns a Web Worker internally; it must be constructed
   // in the browser (not at import time) so import.meta.url resolves correctly.
   const engine = new EngineClient();
-  const infer = createInference({ engine });
+  // Debug log captures every model call (prompt sent + output received) for the
+  // inspector drawer; wired into inference here.
+  const debugLog = createDebugLog();
+  const infer = createInference({ engine, onDebug: debugLog.record });
 
   // Initialize IndexedDB store before rendering
   try {
@@ -25,7 +29,7 @@ async function boot() {
     // Continue — the UI can still work without persistence, just with warnings
   }
 
-  initApp({ engine, infer, casesStore });
+  initApp({ engine, infer, casesStore, debugLog });
 }
 
 boot().catch((err) => {

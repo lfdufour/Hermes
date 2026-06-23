@@ -26,12 +26,15 @@ import { renderTableView } from './tableView.js';
  */
 export function renderStep1View(container, {
   infer, casesStore, currentCase, modelLoaded, tableReady,
-  onCaseUpdated, onFreezeAndContinue,
+  registerModelHook, onCaseUpdated, onFreezeAndContinue,
 }) {
   if (!container) return;
 
   let abortController = null;
   let analyzing = false;
+  // Live mirror of model-loaded state: the model may finish loading AFTER this
+  // view is rendered, so we update the Analyze button reactively via the hook.
+  let liveModelLoaded = modelLoaded;
 
   // Determine if we already have a table to show
   const hasTable = currentCase && currentCase.table &&
@@ -81,6 +84,17 @@ export function renderStep1View(container, {
   // If we already have a table, render it
   if (hasTable) {
     renderTable(currentCase.table, tableReady);
+  }
+
+  // React to the model becoming (un)loaded while this view is on screen.
+  if (registerModelHook) {
+    registerModelHook((loaded) => {
+      liveModelLoaded = loaded;
+      if (analyzeBtn && !analyzing) {
+        analyzeBtn.disabled = !loaded;
+        analyzeBtn.title = loaded ? '' : 'Load a model first';
+      }
+    });
   }
 
   // Analyze button
@@ -140,7 +154,7 @@ export function renderStep1View(container, {
         }
       } finally {
         analyzing = false;
-        if (analyzeBtn) analyzeBtn.disabled = !modelLoaded;
+        if (analyzeBtn) analyzeBtn.disabled = !liveModelLoaded;
         if (cancelBtn) cancelBtn.style.display = 'none';
         abortController = null;
       }
