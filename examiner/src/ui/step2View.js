@@ -26,8 +26,12 @@ import { toCSV, toMarkdown } from '../store/exportReport.js';
  *   onCaseUpdated: (c: import('../types.js').Case) => void,
  * }} opts
  */
-export function renderStep2View(container, { infer, casesStore, currentCase, modelLoaded, onCaseUpdated }) {
+export function renderStep2View(container, { infer, casesStore, currentCase, modelLoaded, registerModelHook, onCaseUpdated }) {
   if (!container || !currentCase) return;
+
+  // Live mirror of model-loaded state (opening a case can land here before a
+  // model is loaded); the Run-mapping button updates reactively via the hook.
+  let liveModelLoaded = modelLoaded;
 
   const table = currentCase.table;
   const features = table && table.features ? table.features : [];
@@ -106,6 +110,17 @@ export function renderStep2View(container, { infer, casesStore, currentCase, mod
   const exportCsvBtn = container.querySelector('#s2-export-csv');
   const exportMdBtn = container.querySelector('#s2-export-md');
   const printBtn = container.querySelector('#s2-print');
+
+  // React to the model becoming (un)loaded while this view is on screen.
+  if (registerModelHook) {
+    registerModelHook((loaded) => {
+      liveModelLoaded = loaded;
+      if (mapBtn && !mapping) {
+        mapBtn.disabled = !loaded;
+        mapBtn.title = loaded ? '' : 'Load a model first';
+      }
+    });
+  }
 
   // ===== Chips Input =====
   /** Add a patent number chip. */
@@ -433,7 +448,7 @@ export function renderStep2View(container, { infer, casesStore, currentCase, mod
       }
 
       mapping = false;
-      if (mapBtn) mapBtn.disabled = !modelLoaded;
+      if (mapBtn) mapBtn.disabled = !liveModelLoaded;
       if (cancelBtn) cancelBtn.style.display = 'none';
       abortController = null;
     });

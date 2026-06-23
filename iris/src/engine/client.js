@@ -131,7 +131,10 @@ export class EngineClient extends EventTarget {
    * @returns {Promise<void>}
    */
   async load({ repo, dtype, device, onProgress }) {
-    await this.#send('load', { repo, dtype, device }, { onProgress });
+    // Return the worker's 'loaded' payload (e.g. { device }) so callers can show
+    // which backend was actually used. Backward-compatible: prior callers that
+    // ignored the return value are unaffected.
+    return this.#send('load', { repo, dtype, device }, { onProgress });
   }
 
   /**

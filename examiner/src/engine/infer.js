@@ -123,12 +123,18 @@ export const EXAMINER_GENCONFIG = {
  *
  * @param {{ engine: import('../../../iris/src/engine/client.js').EngineClient }} opts
  */
-export function createInference({ engine }) {
+export function createInference({ engine, onDebug }) {
   let loaded = false;
 
   /** @param {boolean} v */
   function setModelLoaded(v) { loaded = !!v; }
   function isReady() { return loaded; }
+
+  /** Emit a debug record (sent prompt + received output) to the optional sink. */
+  function emitDebug(rec) {
+    if (!onDebug) return;
+    try { onDebug({ ts: Date.now(), ...rec }); } catch (_) { /* never let logging break inference */ }
+  }
 
   /**
    * Build a messages array from a system + user pair.
@@ -149,20 +155,30 @@ export function createInference({ engine }) {
   async function complete({ system, user, genConfig, signal, onToken }) {
     if (!loaded) throw new Error('No model loaded');
     const messages = toMessages({ system, user });
-    const { input_ids } = await engine.applyChatTemplate({ messages, thinking: false });
+    // `rendered` is the exact templated prompt string the model sees — the most
+    // faithful "what was sent" for the debug inspector.
+    const { input_ids, rendered } = await engine.applyChatTemplate({ messages, thinking: false });
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
     let aborted = false;
     const onAbort = () => { aborted = true; engine.cancel(); };
     if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    const startedAt = Date.now();
     try {
-      const { outputText } = await engine.generate({
+      const { outputText, stats } = await engine.generate({
         input_ids,
         genConfig: { ...EXAMINER_GENCONFIG, ...(genConfig || {}) },
         onToken: onToken || (() => {}),
       });
       if (aborted) throw new DOMException('Aborted', 'AbortError');
-      return stripControlTokens(outputText);
+      const cleaned = stripControlTokens(outputText);
+      emitDebug({ ms: Date.now() - startedAt, ok: true, system, user, rendered, raw: outputText, output: cleaned, stats });
+      return cleaned;
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        emitDebug({ ms: Date.now() - startedAt, ok: false, system, user, rendered, error: e.message || String(e) });
+      }
+      throw e;
     } finally {
       if (signal) signal.removeEventListener('abort', onAbort);
     }
