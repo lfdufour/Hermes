@@ -125,6 +125,7 @@ export const EXAMINER_GENCONFIG = {
  */
 export function createInference({ engine, onDebug }) {
   let loaded = false;
+  let callSeq = 0; // unique id per model call so the debug drawer can update an entry in place
 
   /** @param {boolean} v */
   function setModelLoaded(v) { loaded = !!v; }
@@ -154,10 +155,14 @@ export function createInference({ engine, onDebug }) {
    */
   async function complete({ system, user, genConfig, signal, onToken }) {
     if (!loaded) throw new Error('No model loaded');
+    const callId = ++callSeq;
     const messages = toMessages({ system, user });
     // `rendered` is the exact templated prompt string the model sees — the most
     // faithful "what was sent" for the debug inspector.
     const { input_ids, rendered } = await engine.applyChatTemplate({ messages, thinking: false });
+    // Log the INPUT immediately (status 'running') so the inspector shows what
+    // was sent while generation is still in flight; updated in place on return.
+    emitDebug({ callId, status: 'running', system, user, rendered });
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
     let aborted = false;
@@ -172,11 +177,11 @@ export function createInference({ engine, onDebug }) {
       });
       if (aborted) throw new DOMException('Aborted', 'AbortError');
       const cleaned = stripControlTokens(outputText);
-      emitDebug({ ms: Date.now() - startedAt, ok: true, system, user, rendered, raw: outputText, output: cleaned, stats });
+      emitDebug({ callId, status: 'done', ms: Date.now() - startedAt, ok: true, system, user, rendered, raw: outputText, output: cleaned, stats });
       return cleaned;
     } catch (e) {
       if (e.name !== 'AbortError') {
-        emitDebug({ ms: Date.now() - startedAt, ok: false, system, user, rendered, error: e.message || String(e) });
+        emitDebug({ callId, status: 'error', ms: Date.now() - startedAt, ok: false, system, user, rendered, error: e.message || String(e) });
       }
       throw e;
     } finally {
