@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hermes &mdash; Patent Examiner's Assistant</title>
+  <style>
+    /* ===== Reset & CSS Variables ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      /* Patent-office palette */
+      --bg: #f4f1eb;
+      --surface: #faf8f4;
+      --surface-raised: #ffffff;
+      --border: #d5cfc5;
+      --border-light: #e8e3da;
+      --text: #1c1917;
+      --text-muted: #6b6560;
+      --text-faint: #9e9890;
+
+      /* Ink-blue primary */
+      --primary: #1e3a5f;
+      --primary-hover: #162d4a;
+      --primary-light: #e8eef5;
+      --primary-lighter: #f0f4f9;
+
+      /* Verdict colors (WCAG AA on white) */
+      --verdict-y: #15803d;
+      --verdict-y-bg: #dcfce7;
+      --verdict-p: #b45309;
+      --verdict-p-bg: #fef3c7;
+      --verdict-n: #b91c1c;
+      --verdict-n-bg: #fee2e2;
+
+      /* Functional */
+      --danger: #b91c1c;
+      --danger-hover: #991b1b;
+      --success: #15803d;
+
+      /* Typography */
+      --font-serif: Georgia, "Times New Roman", "DejaVu Serif", serif;
+      --font-sans: system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "SF Mono", "Fira Code", "Fira Mono", "Cascadia Code", ui-monospace, monospace;
+      --radius: 6px;
+      --radius-lg: 10px;
+
+      /* Shimmer animation */
+      --shimmer-from: #eae6df;
+      --shimmer-to: #f4f1eb;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      font-size: 14px;
+    }
+
+    /* ===== App Shell Layout ===== */
+    .app-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* -- Top Bar (model bar + nav) -- */
+    .top-bar {
+      background: var(--surface-raised);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-shrink: 0;
+      min-height: 56px;
+    }
+
+    .app-brand {
+      font-family: var(--font-serif);
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--primary);
+      letter-spacing: -0.02em;
+      flex-shrink: 0;
+    }
+
+    .app-brand small {
+      display: block;
+      font-family: var(--font-sans);
+      font-size: 0.6rem;
+      font-weight: 400;
+      color: var(--text-muted);
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    .nav-tabs {
+      display: flex;
+      gap: 2px;
+      margin-left: 24px;
+    }
+
+    .nav-tab {
+      padding: 7px 16px;
+      border: none;
+      border-radius: var(--radius) var(--radius) 0 0;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      font-family: var(--font-sans);
+    }
+    .nav-tab:hover { background: var(--primary-lighter); color: var(--primary); }
+    .nav-tab.active {
+      background: var(--primary-light);
+      color: var(--primary);
+      font-weight: 600;
+    }
+    .nav-tab:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .model-section {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    /* ===== Model Manager ===== */
+    .mm-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .mm-select {
+      padding: 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.78rem;
+      background: var(--surface);
+      font-family: var(--font-sans);
+      max-width: 220px;
+    }
+    .mm-status {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .mm-device-badge {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+    .mm-progress-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 180px;
+    }
+    .mm-progress-text {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+    }
+    progress {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    progress::-webkit-progress-bar { background: var(--border-light); border-radius: 3px; }
+    progress::-webkit-progress-value { background: var(--primary); border-radius: 3px; transition: width 0.2s; }
+    progress::-moz-progress-bar { background: var(--primary); border-radius: 3px; }
+
+    /* ===== Main Content Area ===== */
+    .main-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    /* ===== View Container + Transitions ===== */
+    .view-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      animation: fadeSlideIn 0.25s ease-out;
+    }
+
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .view-container,
+      .cell-fade-in,
+      .shimmer-cell {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+
+    /* ===== Headings ===== */
+    h1, h2, h3 {
+      font-family: var(--font-serif);
+      color: var(--primary);
+      font-weight: 700;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 16px; }
+    h2 { font-size: 1.2rem; margin-bottom: 12px; }
+    h3 { font-size: 1rem; margin-bottom: 8px; }
+
+    /* ===== Buttons ===== */
+    button {
+      font-family: var(--font-sans);
+      font-size: 0.82rem;
+    }
+    .btn {
+      padding: 8px 18px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+      line-height: 1.3;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+
+    .btn-secondary {
+      background: var(--surface-raised);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover:not(:disabled) { background: var(--primary-lighter); }
+
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: var(--danger-hover); }
+
+    .btn-sm { padding: 5px 12px; font-size: 0.75rem; }
+    .btn-xs { padding: 3px 8px; font-size: 0.7rem; }
+
+    .btn-icon {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      color: var(--text-muted);
+      font-size: 1rem;
+      line-height: 1;
+    }
+    .btn-icon:hover { color: var(--text); }
+
+    /* ===== Inputs / Textarea ===== */
+    textarea, input[type="text"], select {
+      font-family: var(--font-sans);
+      font-size: 0.85rem;
+      color: var(--text);
+    }
+    textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface-raised);
+      resize: vertical;
+      line-height: 1.5;
+    }
+    textarea:focus, input[type="text"]:focus, select:focus {
+      outline: 2px solid var(--primary);
+      outline-offset: -1px;
+      border-color: var(--primary);
+    }
+
+    /* ===== Cards / Paper Surfaces ===== */
+    .card {
+      background: var(--surface-raised);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+
+    /* ===== Collapsible Section ===== */
+    details.collapsible > summary {
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      padding: 6px 0;
+      user-select: none;
+    }
+    details.collapsible > summary:hover { color: var(--primary); }
+
+    /* ===== Chips ===== */
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .chip-ok { background: var(--verdict-y-bg); color: var(--verdict-y); }
+    .chip-fail { background: var(--verdict-n-bg); color: var(--verdict-n); }
+    .chip-pending { background: var(--border-light); color: var(--text-muted); }
+    .chip-pasted { background: var(--verdict-p-bg); color: var(--verdict-p); }
+
+    /* ===== Feature Table Styles ===== */
+    .feature-table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .feature-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    .feature-table th {
+      background: var(--primary);
+      color: #fff;
+      font-weight: 600;
+      text-align: left;
+      padding: 8px 10px;
+      font-size: 0.73rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    .feature-table td {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border-light);
+      vertical-align: top;
+      max-width: 400px;
+    }
+    .feature-table tr:nth-child(even) { background: var(--surface); }
+    .feature-table tr:hover { background: var(--primary-lighter); }
+
+    .feature-table td[contenteditable="true"] {
+      outline: none;
+      cursor: text;
+    }
+    .feature-table td[contenteditable="true"]:focus {
+      box-shadow: inset 0 0 0 2px var(--primary);
+      border-radius: 2px;
+    }
+
+    /* Feature-table portion badges */
+    .portion-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+    .portion-preamble { background: #e0edff; color: #1e40af; }
+    .portion-characterizing { background: #fce7f3; color: #9d174d; }
+
+    /* ===== Matrix / Mapping Table ===== */
+    .matrix-wrap {
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      max-height: calc(100vh - 260px);
+      position: relative;
+    }
+    .matrix-table {
+      border-collapse: collapse;
+      font-size: 0.78rem;
+      min-width: 100%;
+    }
+    .matrix-table th {
+      background: var(--primary);
+      color: #fff;
+      font-weight: 600;
+      padding: 8px 10px;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+      position: sticky;
+      top: 0;
+      z-index: 3;
+    }
+    .matrix-table th.doc-group-header {
+      text-align: center;
+      border-left: 2px solid rgba(255,255,255,0.3);
+    }
+    .matrix-table th.sub-header {
+      background: var(--primary-hover);
+      font-size: 0.65rem;
+      font-weight: 500;
+      position: sticky;
+      top: 34px;
+      z-index: 3;
+    }
+    .matrix-table td {
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--border-light);
+      vertical-align: top;
+    }
+    .matrix-table tr:nth-child(even) td { background: var(--surface); }
+
+    /* Sticky feature-ID column */
+    .matrix-table .sticky-col {
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      background: var(--surface-raised);
+      border-right: 2px solid var(--border);
+      min-width: 180px;
+      max-width: 300px;
+    }
+    .matrix-table tr:nth-child(even) .sticky-col { background: var(--surface); }
+    .matrix-table th.sticky-col {
+      z-index: 4;
+      background: var(--primary);
+      left: 0;
+    }
+
+    /* Doc column groups */
+    .matrix-table td.doc-col {
+      border-left: 1px solid var(--border-light);
+    }
+    .matrix-table td.doc-col-first {
+      border-left: 2px solid var(--border);
+    }
+
+    /* Verdict cells */
+    .verdict-cell {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: box-shadow 0.15s;
+    }
+    .verdict-cell:hover { box-shadow: 0 0 0 2px rgba(30,58,95,0.2); }
+    .verdict-Y { background: var(--verdict-y-bg); color: var(--verdict-y); }
+    .verdict-P { background: var(--verdict-p-bg); color: var(--verdict-p); }
+    .verdict-N { background: var(--verdict-n-bg); color: var(--verdict-n); }
+
+    /* Shimmer animation for running cells */
+    @keyframes shimmer {
+      0% { background-position: -200px 0; }
+      100% { background-position: 200px 0; }
+    }
+    .shimmer-cell {
+      background: linear-gradient(90deg, var(--shimmer-from) 0%, var(--shimmer-to) 50%, var(--shimmer-from) 100%);
+      background-size: 400px 100%;
+      animation: shimmer 1.5s infinite linear;
+      border-radius: 4px;
+      min-height: 24px;
+    }
+
+    /* Fade-in for filled cells */
+    @keyframes cellFadeIn {
+      from { opacity: 0; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .cell-fade-in {
+      animation: cellFadeIn 0.3s ease-out;
+    }
+
+    /* ===== Expanded Cell Card ===== */
+    .cell-expanded {
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      margin: 8px 0;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    .cell-expanded h4 {
+      font-family: var(--font-serif);
+      font-size: 0.9rem;
+      color: var(--primary);
+      margin-bottom: 8px;
+    }
+    .cell-expanded .citation-block {
+      background: var(--surface);
+      border-left: 3px solid var(--primary);
+      padding: 8px 12px;
+      margin: 6px 0;
+      font-size: 0.8rem;
+    }
+    .cell-expanded .citation-label {
+      font-weight: 600;
+      color: var(--primary);
+      font-size: 0.75rem;
+    }
+    .cell-expanded .citation-quote {
+      font-style: italic;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .cell-expanded .explanation-text {
+      margin-top: 10px;
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+    .cell-expanded .dep-context {
+      margin-top: 10px;
+      padding: 8px 12px;
+      background: var(--primary-lighter);
+      border-radius: var(--radius);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+    .cell-expanded .dep-context strong {
+      color: var(--primary);
+    }
+
+    /* ===== Doc Summary Footer ===== */
+    .doc-summary-footer {
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .doc-summary-footer .stat {
+      font-size: 0.82rem;
+    }
+    .doc-summary-footer .stat strong {
+      color: var(--primary);
+    }
+    .doc-summary-footer .category-select {
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.78rem;
+      background: var(--surface-raised);
+      font-weight: 600;
+    }
+
+    /* ===== Cases View ===== */
+    .case-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .case-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .case-item:hover {
+      border-color: var(--primary);
+      box-shadow: 0 2px 8px rgba(30,58,95,0.08);
+    }
+    .case-item .case-title {
+      flex: 1;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .case-item .case-date {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* ===== Legend ===== */
+    .legend {
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    .legend dt {
+      font-weight: 600;
+      color: var(--text);
+      display: inline;
+    }
+    .legend dd {
+      display: inline;
+      margin: 0 12px 0 0;
+    }
+
+    /* ===== Progress / Status Indicators ===== */
+    .progress-status {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      padding: 8px 0;
+    }
+
+    /* ===== Toolbar rows ===== */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .toolbar-spacer { flex: 1; }
+
+    /* ===== Utility ===== */
+    .sr-only {
+      position: absolute; width: 1px; height: 1px;
+      padding: 0; margin: -1px; overflow: hidden;
+      clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
+    .gap-8 { gap: 8px; }
+    .gap-12 { gap: 12px; }
+    .mt-8 { margin-top: 8px; }
+    .mt-12 { margin-top: 12px; }
+    .mt-16 { margin-top: 16px; }
+    .mb-8 { margin-bottom: 8px; }
+    .mb-16 { margin-bottom: 16px; }
+
+    /* ===== Patent chips input ===== */
+    .chips-input-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface-raised);
+      min-height: 40px;
+      cursor: text;
+    }
+    .chips-input-wrap:focus-within {
+      outline: 2px solid var(--primary);
+      outline-offset: -1px;
+    }
+    .chips-input-wrap input {
+      border: none;
+      outline: none;
+      font-size: 0.85rem;
+      background: transparent;
+      flex: 1;
+      min-width: 120px;
+      padding: 2px 0;
+      font-family: var(--font-sans);
+      color: var(--text);
+    }
+    .patent-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+    .patent-chip .chip-remove {
+      cursor: pointer;
+      font-size: 0.85rem;
+      line-height: 1;
+      opacity: 0.6;
+    }
+    .patent-chip .chip-remove:hover { opacity: 1; }
+
+    /* ===== Paste fallback for failed patents ===== */
+    .paste-fallback {
+      margin-top: 6px;
+      padding: 10px;
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+    }
+    .paste-fallback textarea {
+      min-height: 80px;
+      font-size: 0.8rem;
+    }
+
+    /* ===== Print styles ===== */
+    @media print {
+      .top-bar, .nav-tabs, .model-section, .toolbar, button { display: none !important; }
+      .main-content { padding: 0; overflow: visible; }
+      .matrix-wrap { max-height: none; overflow: visible; }
+      .matrix-table .sticky-col { position: static; }
+      .matrix-table th { position: static; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="app" class="app-shell">
+  <!-- Top bar: brand + nav + model manager -->
+  <header class="top-bar">
+    <div class="app-brand">
+      Hermes
+      <small>Patent Examiner's Assistant</small>
+    </div>
+    <nav id="nav-tabs" class="nav-tabs"></nav>
+    <div id="model-bar" class="model-section"></div>
+  </header>
+
+  <!-- Main content area: views render here -->
+  <main id="main-content" class="main-content"></main>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
