@@ -15,17 +15,31 @@
  */
 export function createDebugLog() {
   const entries = [];
+  const byCall = new Map(); // callId -> entry, so a 'running' entry is updated in place
   const subs = new Set();
+  function emit(type, entry) {
+    for (const fn of subs) { try { fn(type, entry); } catch (_) { /* ignore */ } }
+  }
   return {
     record(rec) {
+      // Upsert by callId: first emit creates the entry (input shown immediately),
+      // later emits for the same call update it (output / error filled in).
+      if (rec.callId != null && byCall.has(rec.callId)) {
+        const entry = byCall.get(rec.callId);
+        Object.assign(entry, rec);
+        emit('update', entry);
+        return;
+      }
       const entry = { id: entries.length + 1, ...rec };
       entries.push(entry);
-      for (const fn of subs) { try { fn(entry); } catch (_) { /* ignore */ } }
+      if (rec.callId != null) byCall.set(rec.callId, entry);
+      emit('add', entry);
     },
     subscribe(fn) { subs.add(fn); return () => subs.delete(fn); },
     clear() {
       entries.length = 0;
-      for (const fn of subs) { try { fn(null); } catch (_) { /* ignore */ } }
+      byCall.clear();
+      emit('clear', null);
     },
     getEntries() { return entries.slice(); },
   };
@@ -64,6 +78,9 @@ function injectStyles() {
     .dbg-badge { padding: 1px 7px; border-radius: 8px; font-size: 0.65rem; font-weight: 700; }
     .dbg-ok { background: var(--verdict-y-bg); color: var(--verdict-y); }
     .dbg-err { background: var(--verdict-n-bg); color: var(--verdict-n); }
+    .dbg-run { background: var(--verdict-p-bg); color: var(--verdict-p); animation: dbgPulse 1.2s ease-in-out infinite; }
+    @keyframes dbgPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+    @media (prefers-reduced-motion: reduce) { .dbg-run { animation: none; } }
     .dbg-ms { margin-left: auto; color: var(--text-muted); font-size: 0.72rem; white-space: nowrap; }
     .dbg-preview { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis;
       white-space: nowrap; max-width: 200px; }
@@ -130,17 +147,30 @@ export function createDebugPanel({ debugLog }) {
   if (closeBtn) closeBtn.addEventListener('click', () => setOpen(false));
   if (clearBtn) clearBtn.addEventListener('click', () => debugLog.clear());
 
-  /** Build the DOM for one debug entry. */
-  function renderEntry(e) {
-    const el = document.createElement('details');
-    el.className = 'dbg-entry';
-    const preview = esc((e.output || e.error || '').slice(0, 80).replace(/\s+/g, ' '));
+  const EMPTY_HTML = '<div class="dbg-empty">No model calls yet. Run an analysis or mapping.</div>';
+  const elById = new Map(); // entry.id -> <details> element, for in-place updates
+
+  /** Build the inner HTML (summary + sections) for one debug entry. */
+  function entryInnerHTML(e) {
+    const running = e.status === 'running';
+    const badge = running
+      ? '<span class="dbg-badge dbg-run">RUN</span>'
+      : `<span class="dbg-badge ${e.ok ? 'dbg-ok' : 'dbg-err'}">${e.ok ? 'OK' : 'ERR'}</span>`;
+    const preview = esc((e.output || e.error || (running ? 'generating…' : '')).slice(0, 80).replace(/\s+/g, ' '));
     const ms = e.ms != null ? `${e.ms} ms` : '';
     const tok = e.stats && e.stats.tokens != null ? ` · ${e.stats.tokens} tok` : '';
-    el.innerHTML = `
+    let outputSec;
+    if (running) {
+      outputSec = '<div class="dbg-sec"><h5>Model output</h5><pre class="dbg-pre out">⏳ generating…</pre></div>';
+    } else if (e.ok) {
+      outputSec = `<div class="dbg-sec"><h5>Model output (received)</h5><pre class="dbg-pre out">${esc(e.output)}</pre></div>`;
+    } else {
+      outputSec = `<div class="dbg-sec"><h5>Error</h5><pre class="dbg-pre errtext">${esc(e.error)}</pre></div>`;
+    }
+    return `
       <summary>
         <span class="dbg-num">#${e.id}</span>
-        <span class="dbg-badge ${e.ok ? 'dbg-ok' : 'dbg-err'}">${e.ok ? 'OK' : 'ERR'}</span>
+        ${badge}
         <span class="dbg-preview">${preview || '(empty)'}</span>
         <span class="dbg-ms">${ms}${tok}</span>
       </summary>
@@ -148,24 +178,32 @@ export function createDebugPanel({ debugLog }) {
         ${e.system ? `<div class="dbg-sec"><h5>System prompt</h5><pre class="dbg-pre">${esc(e.system)}</pre></div>` : ''}
         ${e.user ? `<div class="dbg-sec"><h5>User prompt</h5><pre class="dbg-pre">${esc(e.user)}</pre></div>` : ''}
         ${e.rendered ? `<div class="dbg-sec"><h5>Rendered prompt (sent to model)</h5><pre class="dbg-pre">${esc(e.rendered)}</pre></div>` : ''}
-        ${e.ok
-          ? `<div class="dbg-sec"><h5>Model output (received)</h5><pre class="dbg-pre out">${esc(e.output)}</pre></div>`
-          : `<div class="dbg-sec"><h5>Error</h5><pre class="dbg-pre errtext">${esc(e.error)}</pre></div>`}
+        ${outputSec}
       </div>
     `;
-    return el;
   }
 
-  // Live subscription: prepend new entries; on clear (null) reset.
-  debugLog.subscribe((entry) => {
+  // Live subscription: add new entries (input shown immediately), update them in
+  // place when the output/error arrives, and reset on clear.
+  debugLog.subscribe((type, entry) => {
     if (!body) return;
-    if (entry === null) {
-      body.innerHTML = '<div class="dbg-empty">No model calls yet. Run an analysis or mapping.</div>';
+    if (type === 'clear') { body.innerHTML = EMPTY_HTML; elById.clear(); return; }
+
+    if (type === 'update') {
+      const el = elById.get(entry.id);
+      if (el) el.innerHTML = entryInnerHTML(entry); // .open state lives on the element, preserved
       return;
     }
+
+    // type === 'add'
     const emptyEl = body.querySelector('.dbg-empty');
     if (emptyEl) emptyEl.remove();
-    body.insertBefore(renderEntry(entry), body.firstChild);
+    const el = document.createElement('details');
+    el.className = 'dbg-entry';
+    el.open = true; // auto-expand the in-flight call so the input is visible right away
+    el.innerHTML = entryInnerHTML(entry);
+    elById.set(entry.id, el);
+    body.insertBefore(el, body.firstChild);
   });
 
   return { toggleButton };
