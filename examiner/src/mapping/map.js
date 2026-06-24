@@ -16,6 +16,7 @@
 // summarize() export (pure logic) must remain importable without it.
 import { mappingPrompt } from '../features/prompts.js';
 import { dependencyContext } from '../features/table.js';
+import { settings } from '../store/settings.js';
 
 /**
  * Map a single feature against a prior-art document.
@@ -31,10 +32,25 @@ import { dependencyContext } from '../features/table.js';
  */
 export async function mapFeature({ infer, feature, table, doc, signal }) {
   try {
-    // Retrieve relevant passages using lexical overlap ranking
-    // Dynamic import to avoid hard dependency at module load time.
-    const { topPassages } = await import('../patent/retrieve.js');
-    const passages = topPassages(feature.text, doc.passages || [], { k: 6 });
+    // Choose how much of the document to show the model.
+    //  - 'full': the ENTIRE document (all passages, untruncated up to a large
+    //    budget) so paraphrased/synonymous disclosure isn't missed by keyword
+    //    matching. Needs a large-context model (e.g. Gemma 4 256K, Qwen 32K).
+    //  - 'retrieval' (default): only the lexically most-similar passages — fast
+    //    and small-context-friendly.
+    const allPassages = doc.passages || [];
+    let passages, perPassageChars, totalChars;
+    if (settings.getMappingContext() === 'full') {
+      passages = allPassages;
+      perPassageChars = 4000;   // keep individual passages whole in practice
+      totalChars = 120000;      // ~30K tokens; well within large context windows
+    } else {
+      // Dynamic import to avoid a hard dependency at module load time.
+      const { topPassages } = await import('../patent/retrieve.js');
+      passages = topPassages(feature.text, allPassages, { k: 6 });
+      perPassageChars = 600;
+      totalChars = Infinity;
+    }
 
     // Build dependency context for dependent features
     const depCtx = dependencyContext(feature, table);
@@ -44,6 +60,8 @@ export async function mapFeature({ infer, feature, table, doc, signal }) {
       feature,
       dependencyContext: depCtx,
       passages,
+      perPassageChars,
+      totalChars,
     });
 
     const result = await infer.completeJSON({

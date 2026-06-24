@@ -103,6 +103,15 @@ Return JSON only:`,
 export const MODES = ['local', 'manual', 'mock'];
 const DEFAULT_MODE = 'local';
 
+/** How much of each prior-art document is shown to the model during Step 2
+ *  mapping:
+ *   'retrieval' — only the passages most lexically similar to the feature
+ *                 (fast; small context; can miss paraphrased disclosure).
+ *   'full'      — the entire description + claims (best recall regardless of
+ *                 wording; needs a large-context model and is slower). */
+export const MAPPING_CONTEXTS = ['retrieval', 'full'];
+const DEFAULT_MAPPING_CONTEXT = 'retrieval';
+
 /** In-memory state, hydrated from localStorage on first access. */
 let state = null;
 const subs = new Set();
@@ -130,6 +139,7 @@ function ensure() {
   const stored = readStorage() || {};
   state = {
     mode: MODES.includes(stored.mode) ? stored.mode : DEFAULT_MODE,
+    mappingContext: MAPPING_CONTEXTS.includes(stored.mappingContext) ? stored.mappingContext : DEFAULT_MAPPING_CONTEXT,
     prompts: { ...DEFAULT_PROMPTS, ...(stored.prompts || {}) },
   };
   return state;
@@ -146,6 +156,15 @@ export const settings = {
   setMode(mode) {
     if (!MODES.includes(mode)) return;
     ensure().mode = mode;
+    writeStorage();
+    emit();
+  },
+
+  // --- mapping context (how much of each document to show during Step 2) ---
+  getMappingContext() { return ensure().mappingContext; },
+  setMappingContext(ctx) {
+    if (!MAPPING_CONTEXTS.includes(ctx)) return;
+    ensure().mappingContext = ctx;
     writeStorage();
     emit();
   },

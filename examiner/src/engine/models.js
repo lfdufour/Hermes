@@ -1,18 +1,30 @@
 /**
  * engine/models.js — Local model registry for Hermes Patent Examiner.
  *
- * Local-only inference via the reused Iris transformers.js worker. All repos are
- * verified to exist on the HF Hub and are loadable with AutoModelForCausalLM +
- * the tokenizer's own chat template (no model-specific protocol needed since we
- * do plain structured prompting, not tool-calls).
+ * Local-only inference via the reused Iris transformers.js worker. The Qwen /
+ * Llama presets are ungated text CausalLM ONNX builds with a single q4f16 file,
+ * so a plain `dtype` string works and they run on a wide range of devices.
  *
- * NOTE: Gemma-4 QAT-mobile weights are f16-only and need WebGPU 'shader-f16';
- * the Iris worker's resolveDevice() falls back to WASM automatically. The Qwen /
- * Llama presets are q4f16 and run on a wider range of devices — hence a Qwen
- * model is the default, since Gemma has device-support issues on some machines.
+ * The Gemma 4 E2B/E4B presets are different: they are MULTIMODAL, component-split
+ * ONNX repos (embed_tokens / decoder_model_merged / vision_encoder / audio_encoder),
+ * so `dtype` MUST be a per-component object naming the suffix that actually exists
+ * in the repo (decoder/embed/audio are q2f16, vision is fp16). Passing a single
+ * 'q4f16' string 404s because no such file exists. These need WebGPU (f16) and the
+ * worker loads them via AutoModelForImageTextToText (text-only inputs); they offer
+ * a very large context window (up to 256K tokens) which is useful for full-document
+ * feature mapping. A Qwen model stays the default for broad device support.
  */
 
-/** @typedef {{ id:string, label:string, repo:string, dtype:string, note:string, light:boolean }} ModelPreset */
+/** @typedef {{ id:string, label:string, repo:string, dtype:(string|Object<string,string>), note:string, light:boolean }} ModelPreset */
+
+/** Per-component dtype for the Gemma 4 QAT-mobile multimodal ONNX repos. The
+ *  suffixes match the files actually published in onnx-community/gemma-4-*-ONNX. */
+const GEMMA4_DTYPE = {
+  embed_tokens: 'q2f16',
+  audio_encoder: 'q2f16',
+  vision_encoder: 'fp16',
+  decoder_model_merged: 'q2f16',
+};
 
 /** @type {ModelPreset[]} */
 export const MODELS = [
@@ -42,18 +54,18 @@ export const MODELS = [
   },
   {
     id: 'gemma4-e2b',
-    label: 'Gemma 4 E2B (QAT-mobile)',
+    label: 'Gemma 4 E2B (QAT-mobile, WebGPU)',
     repo: 'onnx-community/gemma-4-E2B-it-qat-mobile-ONNX',
-    dtype: 'q4f16',
-    note: 'High quality but f16-only — needs WebGPU shader-f16 or falls back to slow WASM.',
+    dtype: GEMMA4_DTYPE,
+    note: 'High quality, 256K context — great for full-document mapping. Requires WebGPU (f16).',
     light: false,
   },
   {
     id: 'gemma4-e4b',
-    label: 'Gemma 4 E4B (QAT-mobile)',
+    label: 'Gemma 4 E4B (QAT-mobile, WebGPU)',
     repo: 'onnx-community/gemma-4-E4B-it-qat-mobile-ONNX',
-    dtype: 'q4f16',
-    note: 'Highest quality; largest RAM/VRAM. Device-support caveats as E2B.',
+    dtype: GEMMA4_DTYPE,
+    note: 'Highest quality; largest VRAM. 256K context. Requires WebGPU (f16).',
     light: false,
   },
 ];

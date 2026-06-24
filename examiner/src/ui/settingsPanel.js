@@ -7,7 +7,12 @@
  * relies on for parsing.
  */
 
-import { STRUCTURE, PLACEHOLDERS, MODES } from '../store/settings.js';
+import { STRUCTURE, PLACEHOLDERS, MODES, MAPPING_CONTEXTS } from '../store/settings.js';
+
+const MAPPING_CONTEXT_INFO = {
+  retrieval: { label: 'Most relevant passages', desc: 'Send only the passages most similar to each feature (fast; small context).' },
+  full: { label: 'Entire description', desc: 'Send the whole document so paraphrased disclosure is not missed by keyword matching. Needs a large-context model (Gemma 4, Qwen) and is slower.' },
+};
 
 const MODE_INFO = {
   local: { label: 'Local LLM', desc: 'Run the in-browser model. Nothing leaves the device.' },
@@ -114,6 +119,18 @@ export function createSettingsPanel({ settings, onModeChange }) {
           </label>`).join('')}
       </div>
 
+      <div class="set-section-title">Feature mapping context (Step 2)</div>
+      <div class="set-modes" id="set-mapctx">
+        ${MAPPING_CONTEXTS.map(c => `
+          <label class="set-mode" data-mapctx="${c}">
+            <input type="radio" name="set-mapctx" value="${c}">
+            <span>
+              <span class="mlabel">${esc(MAPPING_CONTEXT_INFO[c].label)}</span>
+              <span class="mdesc">${esc(MAPPING_CONTEXT_INFO[c].desc)}</span>
+            </span>
+          </label>`).join('')}
+      </div>
+
       <div class="set-section-title">Prompts</div>
       <p class="set-hint" style="margin-bottom:10px;">
         Edit the instruction text freely. The fixed JSON output structure (shown locked under each
@@ -127,6 +144,7 @@ export function createSettingsPanel({ settings, onModeChange }) {
 
   const closeBtn = drawer.querySelector('#set-close');
   const modesEl = drawer.querySelector('#set-modes');
+  const mapCtxEl = drawer.querySelector('#set-mapctx');
   const fieldsEl = drawer.querySelector('#set-fields');
   const resetAllBtn = drawer.querySelector('#set-reset-all');
 
@@ -154,6 +172,22 @@ export function createSettingsPanel({ settings, onModeChange }) {
         syncModeUI();
         if (onModeChange) onModeChange(input.value);
       }
+    });
+  });
+
+  // --- Mapping-context radios ---
+  function syncMapCtxUI() {
+    const ctx = settings.getMappingContext();
+    mapCtxEl.querySelectorAll('.set-mode').forEach(el => {
+      const c = el.getAttribute('data-mapctx');
+      el.classList.toggle('active', c === ctx);
+      const input = el.querySelector('input');
+      if (input) input.checked = c === ctx;
+    });
+  }
+  mapCtxEl.querySelectorAll('input[name="set-mapctx"]').forEach(input => {
+    input.addEventListener('change', () => {
+      if (input.checked) { settings.setMappingContext(input.value); syncMapCtxUI(); }
     });
   });
 
@@ -199,9 +233,10 @@ export function createSettingsPanel({ settings, onModeChange }) {
     });
   }
 
-  // Keep mode UI in sync if mode is changed elsewhere (e.g. the model bar).
-  settings.subscribe(() => syncModeUI());
+  // Keep selectors in sync if changed elsewhere (e.g. the model bar).
+  settings.subscribe(() => { syncModeUI(); syncMapCtxUI(); });
   syncModeUI();
+  syncMapCtxUI();
 
   return { toggleButton };
 }

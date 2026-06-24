@@ -63,13 +63,20 @@ export function extractionPrompt({ claimsText }) {
  * @param {{ feature: import('../types.js').Feature, dependencyContext: string, passages: import('../types.js').Passage[] }}
  * @returns {{ system: string, user: string }}
  */
-export function mappingPrompt({ feature, dependencyContext, passages }) {
-  // NOTE: We limit passage text to keep the prompt within token budgets
-  // for small models. Each passage is presented with its label so the model
-  // can cite it verbatim.
-  const passageBlock = (passages || []).map(p =>
-    `${p.label}: ${p.text.slice(0, 600)}`
-  ).join('\n\n');
+export function mappingPrompt({ feature, dependencyContext, passages, perPassageChars = 600, totalChars = Infinity }) {
+  // Each passage is presented with its label so the model can cite it verbatim.
+  // perPassageChars / totalChars bound the prompt size: small for lexical
+  // retrieval (few short passages), large for full-document mapping.
+  let used = 0;
+  const lines = [];
+  for (const p of (passages || [])) {
+    const text = p.text.length > perPassageChars ? p.text.slice(0, perPassageChars) : p.text;
+    const line = `${p.label}: ${text}`;
+    if (used + line.length > totalChars) break;
+    used += line.length;
+    lines.push(line);
+  }
+  const passageBlock = lines.join('\n\n');
 
   const depBlock = dependencyContext
     ? `Dependency context (features this feature builds upon from the independent claim):\n${dependencyContext}\n`

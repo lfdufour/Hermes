@@ -127,7 +127,9 @@ export class EngineClient extends EventTarget {
 
   /**
    * Load a model from the HF Hub.
-   * @param {{repo:string, dtype?:string, device?:string, onProgress?:Function}} opts
+   * dtype may be a single string (e.g. 'q4f16') or a per-component object for
+   * split/multimodal repos (e.g. { decoder_model_merged:'q2f16', vision_encoder:'fp16', ... }).
+   * @param {{repo:string, dtype?:(string|Object<string,string>), device?:string, onProgress?:Function}} opts
    * @returns {Promise<void>}
    */
   async load({ repo, dtype, device, onProgress }) {
