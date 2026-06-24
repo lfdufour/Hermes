@@ -149,6 +149,21 @@ function repairJson(s) {
 }
 
 /**
+ * Output-token ceiling for structured generation. We default this HIGH rather
+ * than trying to predict the right size: generation early-stops as soon as the
+ * streamed text is a complete JSON value (see makeCompleteJSON's stopWhen), so a
+ * large ceiling is free for short outputs and only matters when the answer is
+ * genuinely long. A big-context model (e.g. Gemma 4) gets more headroom.
+ *
+ * @param {{ getModelContext?: () => number }} [infer]
+ * @returns {number}
+ */
+export function outputTokenCap(infer) {
+  const ctx = infer && typeof infer.getModelContext === 'function' ? infer.getModelContext() : 0;
+  return ctx >= 100000 ? 32768 : 8192;
+}
+
+/**
  * Default generation config for examiner work: low temperature for faithful,
  * deterministic structured output.
  */

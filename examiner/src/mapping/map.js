@@ -17,6 +17,7 @@
 import { mappingPrompt, mappingPromptBatch } from '../features/prompts.js';
 import { dependencyContext } from '../features/table.js';
 import { settings } from '../store/settings.js';
+import { outputTokenCap } from '../engine/infer.js';
 
 /**
  * Choose how much of a document to show the model for a given set of features.
@@ -131,8 +132,9 @@ export async function mapFeatureGroup({ infer, features, table, doc, signal }) {
       system: prompt.system,
       user: prompt.user,
       schemaHint: '{"results":[{"featureId":str,"verdict":"Y"|"N"|"P","citations":[{"label":str,"quote":str}],"explanation":str}]}',
-      // Room for one result object per feature; early-stops once JSON is complete.
-      genConfig: { max_new_tokens: Math.min(4096, 512 + features.length * 220) },
+      // High ceiling; early-stop ends short batches, so this only matters when
+      // assessing many features at once (whole-table on a large patent).
+      genConfig: { max_new_tokens: outputTokenCap(infer) },
       signal,
     });
 

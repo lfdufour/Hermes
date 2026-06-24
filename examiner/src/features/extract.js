@@ -11,6 +11,7 @@
  */
 
 import { extractionPrompt } from './prompts.js';
+import { outputTokenCap } from '../engine/infer.js';
 import {
   splitClaimsIntoUnits,
   renumber,
@@ -81,12 +82,9 @@ export async function extractFeatureTable({ infer, claims, description, onProgre
       system: prompt.system,
       user: prompt.user,
       schemaHint: '{"features":[{"claim":int,"feature":str,"evidence":str,"type":str}]}',
-      // Each claim yields several features, each with a verbatim "evidence"
-      // string, so the output grows with claim count. Scale the ceiling so a
-      // large claim set isn't truncated mid-JSON. Generation early-stops once a
-      // complete JSON value is produced, so a high ceiling costs nothing when
-      // the output is short.
-      genConfig: { max_new_tokens: Math.min(8192, 1536 + units.length * 384) },
+      // Default the ceiling high; early-stop ends short outputs, so this only
+      // matters for large claim sets (which would otherwise truncate mid-JSON).
+      genConfig: { max_new_tokens: outputTokenCap(infer) },
       signal,
       onToken,
     });
