@@ -5,26 +5,21 @@
  * Llama presets are ungated text CausalLM ONNX builds with a single q4f16 file,
  * so a plain `dtype` string works and they run on a wide range of devices.
  *
- * The Gemma 4 E2B/E4B presets are different: they are MULTIMODAL, component-split
- * ONNX repos (embed_tokens / decoder_model_merged / vision_encoder / audio_encoder),
- * so `dtype` MUST be a per-component object naming the suffix that actually exists
- * in the repo (decoder/embed/audio are q2f16, vision is fp16). Passing a single
- * 'q4f16' string 404s because no such file exists. These need WebGPU (f16) and the
- * worker loads them via AutoModelForImageTextToText (text-only inputs); they offer
- * a very large context window (up to 256K tokens) which is useful for full-document
- * feature mapping. A Qwen model stays the default for broad device support.
+ * The Gemma 4 E2B preset is different: its QAT-mobile weights use a 2-bit
+ * block-quantized embed table (GatherBlockQuantized) that the onnxruntime-web
+ * inside transformers.js cannot run. It therefore uses `engine: 'gemma4'`, a
+ * dedicated WebGPU runtime (see engine/gemma4.js) that ships its own kernels.
+ * It requires WebGPU and offers a very large context window (256K tokens),
+ * useful for full-document feature mapping. A Qwen model stays the default for
+ * broad device support.
  */
 
-/** @typedef {{ id:string, label:string, repo:string, dtype:(string|Object<string,string>), context:number, note:string, light:boolean }} ModelPreset */
-
-/** Per-component dtype for the Gemma 4 QAT-mobile multimodal ONNX repos. The
- *  suffixes match the files actually published in onnx-community/gemma-4-*-ONNX. */
-const GEMMA4_DTYPE = {
-  embed_tokens: 'q2f16',
-  audio_encoder: 'q2f16',
-  vision_encoder: 'fp16',
-  decoder_model_merged: 'q2f16',
-};
+/**
+ * @typedef {{ id:string, label:string, repo:string, dtype?:(string|Object<string,string>),
+ *   context:number, note:string, light:boolean, engine?:('transformers'|'gemma4') }} ModelPreset
+ * `engine` selects the runtime: 'transformers' (default — the Iris worker) or
+ * 'gemma4' (the bespoke WebGPU runtime for Gemma 4's block-quantized weights).
+ */
 
 /** @type {ModelPreset[]} */
 export const MODELS = [
@@ -57,20 +52,11 @@ export const MODELS = [
   },
   {
     id: 'gemma4-e2b',
-    label: 'Gemma 4 E2B (QAT-mobile, WebGPU)',
-    repo: 'onnx-community/gemma-4-E2B-it-qat-mobile-ONNX',
-    dtype: GEMMA4_DTYPE,
+    label: 'Gemma 4 E2B (WebGPU, dedicated runtime)',
+    repo: 'google/gemma-4-E2B-it-qat-mobile-transformers',
+    engine: 'gemma4',
     context: 262144,
-    note: 'High quality, 256K context — great for full-document mapping. Requires WebGPU (f16).',
-    light: false,
-  },
-  {
-    id: 'gemma4-e4b',
-    label: 'Gemma 4 E4B (QAT-mobile, WebGPU)',
-    repo: 'onnx-community/gemma-4-E4B-it-qat-mobile-ONNX',
-    dtype: GEMMA4_DTYPE,
-    context: 262144,
-    note: 'Highest quality; largest VRAM. 256K context. Requires WebGPU (f16).',
+    note: 'High quality, 256K context — great for full-document mapping. Uses a dedicated WebGPU runtime (custom kernels); requires WebGPU. Larger download.',
     light: false,
   },
 ];

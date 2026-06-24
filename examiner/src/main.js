@@ -12,7 +12,9 @@ import {
   createManualInference,
   createMockInference,
   createInferenceRouter,
+  createLocalDispatcher,
 } from './engine/infer.js';
+import { createGemma4Inference } from './engine/gemma4.js';
 import { casesStore } from './store/cases.js';
 import { settings } from './store/settings.js';
 import { initApp } from './ui/app.js';
@@ -27,9 +29,13 @@ async function boot() {
   // inspector drawer; wired into all three providers here.
   const debugLog = createDebugLog();
 
-  // Three execution providers behind a mode-aware router. Cognition modules see
-  // only the router, so switching mode at runtime needs no re-wiring.
-  const local = createInference({ engine, onDebug: debugLog.record });
+  // Execution providers behind a mode-aware router. Cognition modules see only
+  // the router, so switching mode/model at runtime needs no re-wiring.
+  // The "local" mode is itself a dispatcher over two backends: the transformers.js
+  // worker (Qwen/Llama/etc.) and the bespoke Gemma 4 WebGPU runtime.
+  const transformers = createInference({ engine, onDebug: debugLog.record });
+  const gemma4 = createGemma4Inference({ onDebug: debugLog.record });
+  const local = createLocalDispatcher({ engine, transformers, gemma4 });
   const manualModal = createManualPromptModal();
   const manual = createManualInference({ onPrompt: manualModal.request, onDebug: debugLog.record });
   const mock = createMockInference({ onDebug: debugLog.record });

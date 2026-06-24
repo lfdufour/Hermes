@@ -126,9 +126,9 @@ function toMessages({ system, user }) {
   return msgs;
 }
 
-/** A plain-text rendering of a prompt, used by the manual + mock providers (no
- *  tokenizer template available) for the debug inspector and the copy-paste UI. */
-function synthRendered({ system, user }) {
+/** A plain-text rendering of a prompt, used by the manual + mock + gemma4
+ *  providers (no tokenizer template available) for the debug inspector. */
+export function synthRendered({ system, user }) {
   const parts = [];
   if (system && system.trim()) parts.push(`### SYSTEM\n${system}`);
   parts.push(`### USER\n${user}`);
@@ -141,7 +141,7 @@ function synthRendered({ system, user }) {
  *
  * @param {(p:{system?:string,user:string,genConfig?:object,signal?:AbortSignal})=>Promise<string>} complete
  */
-function makeCompleteJSON(complete) {
+export function makeCompleteJSON(complete) {
   return async function completeJSON({ system, user, schemaHint, genConfig, signal, onToken }) {
     const jsonSystem = [
       system || '',
@@ -171,7 +171,7 @@ function makeCompleteJSON(complete) {
 }
 
 /** Shared two-phase debug emitter factory. */
-function makeDebugEmitter(onDebug) {
+export function makeDebugEmitter(onDebug) {
   return function emitDebug(rec) {
     if (!onDebug) return;
     try { onDebug({ ts: Date.now(), ...rec }); } catch (_) { /* never let logging break inference */ }
@@ -394,6 +394,9 @@ export function createInferenceRouter({ local, manual, mock, getMode }) {
     setModelLoaded: (v) => local.setModelLoaded(v),
     setModelContext: (n) => { modelContext = Number(n) || 0; },
     getModelContext: () => modelContext,
+    // Load/unload route to the local backend (transformers or gemma4 dispatcher).
+    load: (preset, opts) => local.load(preset, opts),
+    unload: () => local.unload(),
     // Readiness is mode-aware: manual/mock need no loaded model.
     isReady: () => active().isReady(),
     getMode: () => (getMode ? getMode() : 'local'),
@@ -403,11 +406,47 @@ export function createInferenceRouter({ local, manual, mock, getMode }) {
 }
 
 /**
+ * Local backend dispatcher: the "local" execution mode can be served by either
+ * the transformers.js worker (Qwen/Llama/most models) or the bespoke Gemma 4
+ * WebGPU runtime, depending on the selected preset's `engine`. Presents the same
+ * surface as a single provider, plus load(preset)/unload().
+ *
+ * @param {{ engine: object, transformers: object, gemma4: object }} opts
+ */
+export function createLocalDispatcher({ engine, transformers, gemma4 }) {
+  let active = transformers;
+
+  return {
+    mode: 'local',
+    async load(preset, { onProgress } = {}) {
+      if (preset && preset.engine === 'gemma4') {
+        active = gemma4;
+        return gemma4.load({ onProgress });
+      }
+      active = transformers;
+      const res = await engine.load({
+        repo: preset.repo, dtype: preset.dtype, device: 'auto', onProgress,
+      });
+      transformers.setModelLoaded(true);
+      return res;
+    },
+    async unload() {
+      if (active === gemma4) { await gemma4.unload(); }
+      else { await engine.unload(); transformers.setModelLoaded(false); }
+    },
+    setModelLoaded: (v) => { if (active === transformers) transformers.setModelLoaded(v); },
+    isReady: () => active.isReady(),
+    complete: (p) => active.complete(p),
+    completeJSON: (p) => active.completeJSON(p),
+  };
+}
+
+/**
  * Remove model control/special tokens that may leak into decoded text (the Iris
  * worker decodes with skip_special_tokens:false so protocol parsers can see them;
  * for examiner work we just strip the common ones).
  */
-function stripControlTokens(text) {
+export function stripControlTokens(text) {
   if (!text) return '';
   return text
     .replace(/<\|?(?:end_of_turn|eot_id|im_end|im_start|start_of_turn|end|endoftext)\|?>/g, '')

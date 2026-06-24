@@ -125,22 +125,22 @@ export function initApp({ engine, infer, casesStore, debugLog, settings }) {
         if (progressText) progressText.textContent = 'Starting download…';
 
         try {
-          const res = await engine.load({
-            repo: preset.repo,
-            dtype: preset.dtype,
-            device: 'auto',
+          // Routes to the transformers.js worker or the Gemma 4 WebGPU runtime
+          // based on preset.engine; both report progress and return { device }.
+          const res = await infer.load(preset, {
             onProgress: ({ file, loaded: loadedBytes, total, pct }) => {
               if (progressBar) progressBar.value = pct;
               if (progressText) {
                 const lMB = (loadedBytes / 1024 / 1024).toFixed(1);
                 const tMB = (total / 1024 / 1024).toFixed(1);
-                progressText.textContent = `${file}: ${lMB}/${tMB} MB (${Math.round(pct)}%)`;
+                progressText.textContent = total > 0
+                  ? `${file}: ${lMB}/${tMB} MB (${Math.round(pct)}%)`
+                  : `${file}: ${Math.round(pct)}%`;
               }
             },
           });
 
           modelLoaded = true;
-          infer.setModelLoaded(true);
           // Record context window so Step 2 can auto-pick its batch size.
           if (infer.setModelContext) infer.setModelContext(preset.context || 0);
 
@@ -170,12 +170,11 @@ export function initApp({ engine, infer, casesStore, debugLog, settings }) {
       unloadBtn.addEventListener('click', async () => {
         if (!modelLoaded) return;
         try {
-          await engine.unload();
+          await infer.unload();
         } catch (err) {
           console.error('[Hermes] Unload failed:', err);
         }
         modelLoaded = false;
-        infer.setModelLoaded(false);
         if (infer.setModelContext) infer.setModelContext(0);
         if (statusEl) statusEl.textContent = 'Idle';
         if (deviceEl) deviceEl.style.display = 'none';
