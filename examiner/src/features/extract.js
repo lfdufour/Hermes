@@ -65,16 +65,33 @@ export async function extractFeatureTable({ infer, claims, description, onProgre
   // Single pass over ALL claims.
   const prompt = extractionPrompt({ claimsText: claims });
   let result;
+  // Live progress: report a streamed-character tally (throttled) so a slow
+  // generation never looks frozen.
+  const startedAt = Date.now();
+  let lastReport = 0;
+  const onToken = (_payload, acc) => {
+    const now = Date.now();
+    if (onProgress && now - lastReport > 200) {
+      lastReport = now;
+      onProgress({ phase: 'analyzing', chars: (acc || '').length, ms: now - startedAt });
+    }
+  };
   try {
     result = await infer.completeJSON({
       system: prompt.system,
       user: prompt.user,
       schemaHint: '{"features":[{"claim":int,"feature":str,"evidence":str,"type":str}]}',
-      // Many features across all claims — give the model room to finish.
+      // Generation stops early once a complete JSON value is produced (see
+      // completeJSON); this ceiling is only a safety bound.
       genConfig: { max_new_tokens: 2048 },
       signal,
+      onToken,
     });
   } catch (err) {
+    // A user cancel must propagate — never fabricate a fallback table from a
+    // deliberate abort (that previously produced a confusing one-feature-per-
+    // claim result). Only genuine model errors fall through to the fallback.
+    if (err && err.name === 'AbortError') throw err;
     console.warn('Feature extraction failed:', err.message);
     result = null;
   }

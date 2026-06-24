@@ -161,7 +161,9 @@ export function createDebugPanel({ debugLog }) {
     const tok = e.stats && e.stats.tokens != null ? ` · ${e.stats.tokens} tok` : '';
     let outputSec;
     if (running) {
-      outputSec = '<div class="dbg-sec"><h5>Model output</h5><pre class="dbg-pre out">⏳ generating…</pre></div>';
+      // Show streamed partial output if we have any yet, else a spinner hint.
+      const partial = e.output ? esc(e.output) : '⏳ generating…';
+      outputSec = `<div class="dbg-sec"><h5>Model output (streaming…)</h5><pre class="dbg-pre out">${partial}</pre></div>`;
     } else if (e.ok) {
       outputSec = `<div class="dbg-sec"><h5>Model output (received)</h5><pre class="dbg-pre out">${esc(e.output)}</pre></div>`;
     } else {

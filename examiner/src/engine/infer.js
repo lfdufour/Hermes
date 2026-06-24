@@ -142,14 +142,20 @@ function synthRendered({ system, user }) {
  * @param {(p:{system?:string,user:string,genConfig?:object,signal?:AbortSignal})=>Promise<string>} complete
  */
 function makeCompleteJSON(complete) {
-  return async function completeJSON({ system, user, schemaHint, genConfig, signal }) {
+  return async function completeJSON({ system, user, schemaHint, genConfig, signal, onToken }) {
     const jsonSystem = [
       system || '',
       'You output ONLY valid JSON — no prose, no Markdown fences, no commentary.',
       schemaHint ? `The JSON must match this shape: ${schemaHint}` : '',
     ].filter(Boolean).join('\n');
 
-    const first = await complete({ system: jsonSystem, user, genConfig, signal });
+    // Stop generating the moment the streamed text already parses as a complete
+    // JSON value — avoids waiting out a small model that keeps emitting tokens
+    // after the answer is done. Providers that ignore stopWhen (manual/mock)
+    // simply never call it.
+    const stopWhen = (acc) => parseJSONLoose(acc) !== null;
+
+    const first = await complete({ system: jsonSystem, user, genConfig, signal, onToken, stopWhen });
     let parsed = parseJSONLoose(first);
     if (parsed !== null) return parsed;
 
@@ -157,7 +163,7 @@ function makeCompleteJSON(complete) {
     const retryUser =
       `Your previous answer was not valid JSON. Re-output the SAME content as a single ` +
       `valid JSON value only.\n\nPrevious answer:\n${first}`;
-    const second = await complete({ system: jsonSystem, user: retryUser, genConfig, signal });
+    const second = await complete({ system: jsonSystem, user: retryUser, genConfig, signal, onToken, stopWhen });
     parsed = parseJSONLoose(second);
     if (parsed !== null) return parsed;
     throw new Error('Model did not return parseable JSON');
@@ -185,7 +191,7 @@ export function createInference({ engine, onDebug }) {
   function setModelLoaded(v) { loaded = !!v; }
   function isReady() { return loaded; }
 
-  async function complete({ system, user, genConfig, signal, onToken }) {
+  async function complete({ system, user, genConfig, signal, onToken, stopWhen }) {
     if (!loaded) throw new Error('No model loaded');
     const callId = ++callSeq;
     const messages = toMessages({ system, user });
@@ -203,19 +209,45 @@ export function createInference({ engine, onDebug }) {
     emitDebug({ callId, status: 'running', system, user, rendered });
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-    let aborted = false;
-    const onAbort = () => { aborted = true; engine.cancel(); };
+    let userAborted = false;
+    let earlyStopped = false; // stopWhen fired — a graceful early finish, NOT an abort
+    const onAbort = () => { userAborted = true; engine.cancel(); };
     if (signal) signal.addEventListener('abort', onAbort, { once: true });
     const startedAt = Date.now();
+
+    // Accumulate streamed text so we can (a) show live progress in the debug
+    // drawer, (b) feed callers a running tally, and (c) stop generation as soon
+    // as the output already contains everything we need (stopWhen) — small
+    // models otherwise keep rambling up to max_new_tokens long after the JSON
+    // is complete, which looks like an endless hang.
+    let acc = '';
+    let lastDebugEmit = 0;
+    const innerOnToken = (payload) => {
+      const t = payload && payload.text ? payload.text : '';
+      if (t) acc += t;
+      const now = Date.now();
+      if (now - lastDebugEmit > 250) {
+        lastDebugEmit = now;
+        emitDebug({ callId, status: 'running', system, user, rendered, output: stripControlTokens(acc) });
+      }
+      if (onToken) { try { onToken(payload, acc); } catch (_) { /* ignore */ } }
+      // Only test the (relatively expensive) predicate when a closing bracket
+      // just arrived — cheap gate that still catches a completed JSON value.
+      if (stopWhen && !earlyStopped && !userAborted && (t.includes('}') || t.includes(']'))) {
+        try { if (stopWhen(acc)) { earlyStopped = true; engine.cancel(); } } catch (_) { /* ignore */ }
+      }
+    };
+
     try {
       const { outputText, stats } = await engine.generate({
         input_ids,
         genConfig: { ...EXAMINER_GENCONFIG, ...(genConfig || {}) },
-        onToken: onToken || (() => {}),
+        onToken: innerOnToken,
       });
-      if (aborted) throw new DOMException('Aborted', 'AbortError');
-      const cleaned = stripControlTokens(outputText);
-      emitDebug({ callId, status: 'done', ms: Date.now() - startedAt, ok: true, system, user, rendered, raw: outputText, output: cleaned, stats });
+      // A user-initiated abort (not an early stop) is an error path.
+      if (userAborted && !earlyStopped) throw new DOMException('Aborted', 'AbortError');
+      const cleaned = stripControlTokens(outputText || acc);
+      emitDebug({ callId, status: 'done', ms: Date.now() - startedAt, ok: true, system, user, rendered, raw: outputText, output: cleaned, stats: { ...(stats || {}), earlyStopped } });
       return cleaned;
     } catch (e) {
       if (e.name !== 'AbortError') {

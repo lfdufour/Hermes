@@ -125,12 +125,17 @@ export function renderStep1View(container, {
           claims,
           description,
           signal: abortController.signal,
-          onProgress: ({ phase }) => {
-            if (progressEl) {
-              progressEl.textContent =
-                phase === 'assembling' ? 'Assembling feature table…'
-                : phase === 'done' ? 'Finalizing…'
-                : 'Analyzing all claims in one pass…';
+          onProgress: ({ phase, chars, ms }) => {
+            if (!progressEl) return;
+            if (phase === 'assembling') {
+              progressEl.textContent = 'Assembling feature table…';
+            } else if (phase === 'done') {
+              progressEl.textContent = 'Finalizing…';
+            } else if (chars) {
+              const secs = ms ? Math.round(ms / 1000) : 0;
+              progressEl.textContent = `Analyzing all claims… (${chars} chars generated, ${secs}s)`;
+            } else {
+              progressEl.textContent = 'Analyzing all claims in one pass…';
             }
           },
         });
