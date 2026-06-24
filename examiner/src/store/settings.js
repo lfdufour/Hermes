@@ -125,6 +125,10 @@ const DEFAULT_MAPPING_CONTEXT = 'retrieval';
  *               capable, large-context model or it may drop/garble features). */
 export const MAPPING_BATCHES = ['feature', 'claim', 'all'];
 const DEFAULT_MAPPING_BATCH = 'claim';
+/** When true, the batch granularity is chosen automatically from the loaded
+ *  model's context window (whole-table for very large context, per-claim
+ *  otherwise); the manual selection above is used only when auto is off. */
+const DEFAULT_MAPPING_BATCH_AUTO = true;
 
 /** In-memory state, hydrated from localStorage on first access. */
 let state = null;
@@ -155,6 +159,7 @@ function ensure() {
     mode: MODES.includes(stored.mode) ? stored.mode : DEFAULT_MODE,
     mappingContext: MAPPING_CONTEXTS.includes(stored.mappingContext) ? stored.mappingContext : DEFAULT_MAPPING_CONTEXT,
     mappingBatch: MAPPING_BATCHES.includes(stored.mappingBatch) ? stored.mappingBatch : DEFAULT_MAPPING_BATCH,
+    mappingBatchAuto: typeof stored.mappingBatchAuto === 'boolean' ? stored.mappingBatchAuto : DEFAULT_MAPPING_BATCH_AUTO,
     prompts: { ...DEFAULT_PROMPTS, ...(stored.prompts || {}) },
   };
   return state;
@@ -189,6 +194,12 @@ export const settings = {
   setMappingBatch(b) {
     if (!MAPPING_BATCHES.includes(b)) return;
     ensure().mappingBatch = b;
+    writeStorage();
+    emit();
+  },
+  getMappingBatchAuto() { return ensure().mappingBatchAuto; },
+  setMappingBatchAuto(v) {
+    ensure().mappingBatchAuto = !!v;
     writeStorage();
     emit();
   },

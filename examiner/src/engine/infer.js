@@ -380,6 +380,9 @@ function mockResponse({ system, user }) {
  * @param {{ local:object, manual:object, mock:object, getMode:()=>string }} opts
  */
 export function createInferenceRouter({ local, manual, mock, getMode }) {
+  // Context window (tokens) of the currently-loaded local model, set by the UI
+  // on load/unload. Used for auto-selecting the Step 2 mapping batch size.
+  let modelContext = 0;
   function active() {
     const m = getMode ? getMode() : 'local';
     if (m === 'manual') return manual;
@@ -389,6 +392,8 @@ export function createInferenceRouter({ local, manual, mock, getMode }) {
   return {
     // Model load state only applies to the local provider.
     setModelLoaded: (v) => local.setModelLoaded(v),
+    setModelContext: (n) => { modelContext = Number(n) || 0; },
+    getModelContext: () => modelContext,
     // Readiness is mode-aware: manual/mock need no loaded model.
     isReady: () => active().isReady(),
     getMode: () => (getMode ? getMode() : 'local'),

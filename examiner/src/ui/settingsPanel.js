@@ -138,6 +138,10 @@ export function createSettingsPanel({ settings, onModeChange }) {
       </div>
 
       <div class="set-section-title">Feature mapping speed (Step 2)</div>
+      <label class="set-auto" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;cursor:pointer;font-size:0.82rem;">
+        <input type="checkbox" id="set-mapbatch-auto" style="margin-top:3px;">
+        <span><strong>Auto</strong> — match the loaded model: whole-table for very large context (Gemma 4), per-claim otherwise.</span>
+      </label>
       <div class="set-modes" id="set-mapbatch">
         ${MAPPING_BATCHES.map(b => `
           <label class="set-mode" data-mapbatch="${b}">
@@ -210,15 +214,22 @@ export function createSettingsPanel({ settings, onModeChange }) {
     });
   });
 
-  // --- Mapping-batch radios ---
+  // --- Mapping-batch radios + auto checkbox ---
+  const autoEl = drawer.querySelector('#set-mapbatch-auto');
   function syncMapBatchUI() {
+    const auto = settings.getMappingBatchAuto();
     const b = settings.getMappingBatch();
+    if (autoEl) autoEl.checked = auto;
+    mapBatchEl.style.opacity = auto ? '0.45' : '';
     mapBatchEl.querySelectorAll('.set-mode').forEach(el => {
       const v = el.getAttribute('data-mapbatch');
-      el.classList.toggle('active', v === b);
+      el.classList.toggle('active', !auto && v === b);
       const input = el.querySelector('input');
-      if (input) input.checked = v === b;
+      if (input) { input.checked = v === b; input.disabled = auto; }
     });
+  }
+  if (autoEl) {
+    autoEl.addEventListener('change', () => { settings.setMappingBatchAuto(autoEl.checked); syncMapBatchUI(); });
   }
   mapBatchEl.querySelectorAll('input[name="set-mapbatch"]').forEach(input => {
     input.addEventListener('change', () => {

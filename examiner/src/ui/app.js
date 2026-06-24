@@ -141,6 +141,8 @@ export function initApp({ engine, infer, casesStore, debugLog, settings }) {
 
           modelLoaded = true;
           infer.setModelLoaded(true);
+          // Record context window so Step 2 can auto-pick its batch size.
+          if (infer.setModelContext) infer.setModelContext(preset.context || 0);
 
           const backend = (res && res.device) ? res.device : 'unknown';
           if (statusEl) statusEl.textContent = `Loaded: ${preset.label}`;
@@ -174,6 +176,7 @@ export function initApp({ engine, infer, casesStore, debugLog, settings }) {
         }
         modelLoaded = false;
         infer.setModelLoaded(false);
+        if (infer.setModelContext) infer.setModelContext(0);
         if (statusEl) statusEl.textContent = 'Idle';
         if (deviceEl) deviceEl.style.display = 'none';
         if (unloadBtn) unloadBtn.style.display = 'none';

@@ -161,6 +161,22 @@ function errorCell(featureId, error) {
 }
 
 /**
+ * Resolve the effective batch granularity. When the "auto" setting is on, pick
+ * it from the loaded model's context window: a very large context (≈Gemma 4's
+ * 256K) → whole-table; a mid context (≈Qwen/Llama) → per-claim; tiny/unknown →
+ * per-feature. Otherwise use the manual selection.
+ * @param {{ getModelContext?: () => number }} infer
+ * @returns {'feature'|'claim'|'all'}
+ */
+export function resolveBatch(infer) {
+  if (!settings.getMappingBatchAuto()) return settings.getMappingBatch();
+  const ctx = (infer && typeof infer.getModelContext === 'function') ? infer.getModelContext() : 0;
+  if (ctx >= 200000) return 'all';
+  if (ctx >= 16000) return 'claim';
+  return 'feature';
+}
+
+/**
  * Partition features into model-call groups per the mapping-batch setting.
  * @param {import('../types.js').Feature[]} features
  * @param {'feature'|'claim'|'all'} batch
@@ -198,7 +214,7 @@ function groupFeatures(features, batch) {
 export async function mapDocument({ infer, table, doc, onCell, signal }) {
   /** @type {import('../types.js').CellResult[]} */
   const cells = [];
-  const batch = settings.getMappingBatch();
+  const batch = resolveBatch(infer);
   const groups = groupFeatures(table.features || [], batch);
 
   for (const group of groups) {
