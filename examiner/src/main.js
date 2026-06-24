@@ -7,19 +7,33 @@
  */
 
 import { EngineClient } from '../../iris/src/engine/client.js';
-import { createInference } from './engine/infer.js';
+import {
+  createInference,
+  createManualInference,
+  createMockInference,
+  createInferenceRouter,
+} from './engine/infer.js';
 import { casesStore } from './store/cases.js';
+import { settings } from './store/settings.js';
 import { initApp } from './ui/app.js';
 import { createDebugLog } from './ui/debugPanel.js';
+import { createManualPromptModal } from './ui/manualPrompt.js';
 
 async function boot() {
   // NOTE: EngineClient spawns a Web Worker internally; it must be constructed
   // in the browser (not at import time) so import.meta.url resolves correctly.
   const engine = new EngineClient();
   // Debug log captures every model call (prompt sent + output received) for the
-  // inspector drawer; wired into inference here.
+  // inspector drawer; wired into all three providers here.
   const debugLog = createDebugLog();
-  const infer = createInference({ engine, onDebug: debugLog.record });
+
+  // Three execution providers behind a mode-aware router. Cognition modules see
+  // only the router, so switching mode at runtime needs no re-wiring.
+  const local = createInference({ engine, onDebug: debugLog.record });
+  const manualModal = createManualPromptModal();
+  const manual = createManualInference({ onPrompt: manualModal.request, onDebug: debugLog.record });
+  const mock = createMockInference({ onDebug: debugLog.record });
+  const infer = createInferenceRouter({ local, manual, mock, getMode: settings.getMode });
 
   // Initialize IndexedDB store before rendering
   try {
@@ -29,7 +43,7 @@ async function boot() {
     // Continue — the UI can still work without persistence, just with warnings
   }
 
-  initApp({ engine, infer, casesStore, debugLog });
+  initApp({ engine, infer, casesStore, debugLog, settings });
 }
 
 boot().catch((err) => {

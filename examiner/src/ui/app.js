@@ -11,13 +11,14 @@ import { renderCasesView } from './casesView.js';
 import { renderStep1View } from './step1View.js';
 import { renderStep2View } from './step2View.js';
 import { createDebugPanel } from './debugPanel.js';
+import { createSettingsPanel } from './settingsPanel.js';
 
 /**
  * Initialize the application UI.
  *
- * @param {{ engine: object, infer: object, casesStore: object }} deps
+ * @param {{ engine: object, infer: object, casesStore: object, settings: object }} deps
  */
-export function initApp({ engine, infer, casesStore, debugLog }) {
+export function initApp({ engine, infer, casesStore, debugLog, settings }) {
   const navContainer = document.getElementById('nav-tabs');
   const modelBar = document.getElementById('model-bar');
   const mainContent = document.getElementById('main-content');
@@ -26,11 +27,25 @@ export function initApp({ engine, infer, casesStore, debugLog }) {
   let currentView = 'cases'; // 'cases' | 'step1' | 'step2'
   /** @type {import('../types.js').Case|null} */
   let currentCase = null;
-  let modelLoaded = false;
+  let modelLoaded = false; // tracks the LOCAL provider's loaded model
   let modelLoading = false;
   // The currently-rendered view can register a hook here so it is notified live
-  // when the model finishes loading/unloading (its action buttons gate on this).
+  // when readiness changes (its action buttons gate on this).
   let modelStateHook = null;
+  // Set by renderModelBar so other code can re-sync the mode selector + control
+  // visibility in place, without a disruptive full re-render of the model bar.
+  let modeBarSync = null;
+
+  // Readiness is mode-aware: local mode needs a loaded model; manual/mock are
+  // always ready (no model). Cognition gating uses this, not modelLoaded.
+  const ready = () => infer.isReady();
+  const getMode = () => (settings ? settings.getMode() : 'local');
+
+  /** Recompute readiness and push it into nav state + the live view's hook. */
+  function refreshReady() {
+    updateNavState();
+    if (modelStateHook) modelStateHook(ready());
+  }
 
   // ===== Model Bar =====
   /** Render the model selection + load controls. */
@@ -38,11 +53,18 @@ export function initApp({ engine, infer, casesStore, debugLog }) {
     if (!modelBar) return;
     modelBar.innerHTML = `
       <div class="mm-row">
-        <select id="mm-select" class="mm-select" aria-label="Select model">
-          ${MODELS.map(m => `<option value="${m.id}" ${m.id === DEFAULT_MODEL_ID ? 'selected' : ''}>${m.label}</option>`).join('')}
+        <select id="mm-mode" class="mm-select" aria-label="Execution mode" title="How model calls are fulfilled">
+          <option value="local">Mode: Local LLM</option>
+          <option value="manual">Mode: Copy-paste</option>
+          <option value="mock">Mode: Debug (no AI)</option>
         </select>
-        <button id="mm-load-btn" class="btn btn-primary btn-sm">Load</button>
-        <button id="mm-unload-btn" class="btn btn-danger btn-sm" style="display:none">Unload</button>
+        <span id="mm-modelctrls" class="mm-modelctrls">
+          <select id="mm-select" class="mm-select" aria-label="Select model">
+            ${MODELS.map(m => `<option value="${m.id}" ${m.id === DEFAULT_MODEL_ID ? 'selected' : ''}>${m.label}</option>`).join('')}
+          </select>
+          <button id="mm-load-btn" class="btn btn-primary btn-sm">Load</button>
+          <button id="mm-unload-btn" class="btn btn-danger btn-sm" style="display:none">Unload</button>
+        </span>
         <span id="mm-status" class="mm-status">Idle</span>
         <span id="mm-device" class="mm-device-badge" style="display:none"></span>
       </div>
@@ -52,6 +74,8 @@ export function initApp({ engine, infer, casesStore, debugLog }) {
       </div>
     `;
 
+    const modeEl = modelBar.querySelector('#mm-mode');
+    const modelCtrls = modelBar.querySelector('#mm-modelctrls');
     const selectEl = modelBar.querySelector('#mm-select');
     const loadBtn = modelBar.querySelector('#mm-load-btn');
     const unloadBtn = modelBar.querySelector('#mm-unload-btn');
@@ -60,6 +84,31 @@ export function initApp({ engine, infer, casesStore, debugLog }) {
     const progressWrap = modelBar.querySelector('#mm-progress');
     const progressBar = modelBar.querySelector('#mm-progress-bar');
     const progressText = modelBar.querySelector('#mm-progress-text');
+
+    // --- Execution mode ---
+    /** Reflect the active mode: hide model load controls unless in local mode. */
+    function applyMode() {
+      const mode = getMode();
+      if (modeEl) modeEl.value = mode;
+      if (modelCtrls) modelCtrls.style.display = mode === 'local' ? '' : 'none';
+      if (deviceEl && mode !== 'local') deviceEl.style.display = 'none';
+      if (statusEl) {
+        if (mode === 'manual') statusEl.textContent = 'Copy-paste mode — no local model needed';
+        else if (mode === 'mock') statusEl.textContent = 'Debug mode — no AI is called';
+        else statusEl.textContent = modelLoaded ? statusEl.textContent : 'Idle';
+      }
+    }
+    if (modeEl) {
+      modeEl.addEventListener('change', () => {
+        if (settings) settings.setMode(modeEl.value); // emits → syncs everything
+        applyMode();
+        refreshReady();
+      });
+    }
+    applyMode();
+    // Expose in-place sync so settings changes elsewhere don't force a full
+    // re-render (which would lose the loaded-model button state).
+    modeBarSync = applyMode;
 
     if (loadBtn) {
       loadBtn.addEventListener('click', async () => {
@@ -102,9 +151,8 @@ export function initApp({ engine, infer, casesStore, debugLog }) {
           if (loadBtn) loadBtn.style.display = 'none';
           if (unloadBtn) unloadBtn.style.display = 'inline-block';
           if (progressWrap) progressWrap.style.display = 'none';
-          updateNavState();
-          // Notify the live view so its (already-rendered) action button enables.
-          if (modelStateHook) modelStateHook(true);
+          // Notify nav + the live view so its (already-rendered) action button enables.
+          refreshReady();
         } catch (err) {
           if (statusEl) statusEl.textContent = 'Error: ' + err.message;
           console.error('[Hermes] Model load failed:', err);
@@ -130,8 +178,7 @@ export function initApp({ engine, infer, casesStore, debugLog }) {
         if (deviceEl) deviceEl.style.display = 'none';
         if (unloadBtn) unloadBtn.style.display = 'none';
         if (loadBtn) loadBtn.style.display = 'inline-block';
-        updateNavState();
-        if (modelStateHook) modelStateHook(false);
+        refreshReady();
       });
     }
   }
@@ -170,11 +217,12 @@ export function initApp({ engine, infer, casesStore, debugLog }) {
       if (tab.alwaysEnabled) {
         btn.disabled = false;
       } else if (view === 'step1') {
-        // Step 1 requires a model loaded OR an existing case loaded
-        btn.disabled = !modelLoaded && !currentCase;
+        // Step 1 requires readiness (model loaded, or manual/mock mode) OR an
+        // existing case already loaded.
+        btn.disabled = !ready() && !currentCase;
       } else if (view === 'step2') {
-        // Step 2 requires a frozen table in the current case + model loaded
-        btn.disabled = !modelLoaded || !currentCase || !currentCase.table ||
+        // Step 2 requires readiness + a frozen table in the current case.
+        btn.disabled = !ready() || !currentCase || !currentCase.table ||
                        !currentCase.table.features || currentCase.table.features.length === 0;
       }
 
@@ -235,7 +283,7 @@ export function initApp({ engine, infer, casesStore, debugLog }) {
           infer,
           casesStore,
           currentCase,
-          modelLoaded,
+          modelLoaded: ready(),
           registerModelHook: (fn) => { modelStateHook = fn; },
           tableReady: opts && opts.tableReady,
           onCaseUpdated: (updatedCase) => {
@@ -254,7 +302,7 @@ export function initApp({ engine, infer, casesStore, debugLog }) {
           infer,
           casesStore,
           currentCase,
-          modelLoaded,
+          modelLoaded: ready(),
           registerModelHook: (fn) => { modelStateHook = fn; },
           onCaseUpdated: (updatedCase) => {
             currentCase = updatedCase;
@@ -272,10 +320,23 @@ export function initApp({ engine, infer, casesStore, debugLog }) {
   renderNav();
   renderView();
 
+  const topBar = document.querySelector('.top-bar');
+
+  // Settings drawer: execution mode + editable prompts.
+  if (settings) {
+    const { toggleButton } = createSettingsPanel({ settings });
+    if (topBar && toggleButton) topBar.appendChild(toggleButton);
+    // Mode can change from either the model bar or the settings drawer; a single
+    // subscription keeps the model bar selector + nav gating in sync in place.
+    settings.subscribe(() => {
+      if (modeBarSync) modeBarSync();
+      refreshReady();
+    });
+  }
+
   // Debug inspector: toggle button in the top bar + slide-in drawer.
   if (debugLog) {
     const { toggleButton } = createDebugPanel({ debugLog });
-    const topBar = document.querySelector('.top-bar');
     if (topBar && toggleButton) topBar.appendChild(toggleButton);
   }
 }

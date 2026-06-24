@@ -118,41 +118,73 @@ export const EXAMINER_GENCONFIG = {
   repetition_penalty: 1.05,
 };
 
+/** Build a messages array from a system + user pair. */
+function toMessages({ system, user }) {
+  const msgs = [];
+  if (system && system.trim()) msgs.push({ role: 'system', content: system });
+  msgs.push({ role: 'user', content: user });
+  return msgs;
+}
+
+/** A plain-text rendering of a prompt, used by the manual + mock providers (no
+ *  tokenizer template available) for the debug inspector and the copy-paste UI. */
+function synthRendered({ system, user }) {
+  const parts = [];
+  if (system && system.trim()) parts.push(`### SYSTEM\n${system}`);
+  parts.push(`### USER\n${user}`);
+  return parts.join('\n\n');
+}
+
 /**
- * Create the inference facade.
+ * Wrap any raw `complete(text)` function with JSON extraction + one repair
+ * retry. Mode-agnostic so local, manual, and mock all share the same parsing.
  *
- * @param {{ engine: import('../../../iris/src/engine/client.js').EngineClient }} opts
+ * @param {(p:{system?:string,user:string,genConfig?:object,signal?:AbortSignal})=>Promise<string>} complete
+ */
+function makeCompleteJSON(complete) {
+  return async function completeJSON({ system, user, schemaHint, genConfig, signal }) {
+    const jsonSystem = [
+      system || '',
+      'You output ONLY valid JSON — no prose, no Markdown fences, no commentary.',
+      schemaHint ? `The JSON must match this shape: ${schemaHint}` : '',
+    ].filter(Boolean).join('\n');
+
+    const first = await complete({ system: jsonSystem, user, genConfig, signal });
+    let parsed = parseJSONLoose(first);
+    if (parsed !== null) return parsed;
+
+    // One retry: feed the bad output back and demand corrected JSON only.
+    const retryUser =
+      `Your previous answer was not valid JSON. Re-output the SAME content as a single ` +
+      `valid JSON value only.\n\nPrevious answer:\n${first}`;
+    const second = await complete({ system: jsonSystem, user: retryUser, genConfig, signal });
+    parsed = parseJSONLoose(second);
+    if (parsed !== null) return parsed;
+    throw new Error('Model did not return parseable JSON');
+  };
+}
+
+/** Shared two-phase debug emitter factory. */
+function makeDebugEmitter(onDebug) {
+  return function emitDebug(rec) {
+    if (!onDebug) return;
+    try { onDebug({ ts: Date.now(), ...rec }); } catch (_) { /* never let logging break inference */ }
+  };
+}
+
+/**
+ * Create the LOCAL inference provider (in-browser LLM via the Iris engine).
+ *
+ * @param {{ engine: import('../../../iris/src/engine/client.js').EngineClient, onDebug?:Function }} opts
  */
 export function createInference({ engine, onDebug }) {
   let loaded = false;
   let callSeq = 0; // unique id per model call so the debug drawer can update an entry in place
+  const emitDebug = makeDebugEmitter(onDebug);
 
-  /** @param {boolean} v */
   function setModelLoaded(v) { loaded = !!v; }
   function isReady() { return loaded; }
 
-  /** Emit a debug record (sent prompt + received output) to the optional sink. */
-  function emitDebug(rec) {
-    if (!onDebug) return;
-    try { onDebug({ ts: Date.now(), ...rec }); } catch (_) { /* never let logging break inference */ }
-  }
-
-  /**
-   * Build a messages array from a system + user pair.
-   * @param {{system?:string, user:string}} p
-   */
-  function toMessages({ system, user }) {
-    const msgs = [];
-    if (system && system.trim()) msgs.push({ role: 'system', content: system });
-    msgs.push({ role: 'user', content: user });
-    return msgs;
-  }
-
-  /**
-   * Run a chat completion and return the raw text.
-   * @param {{system?:string, user:string, genConfig?:object, signal?:AbortSignal, onToken?:Function}} p
-   * @returns {Promise<string>}
-   */
   async function complete({ system, user, genConfig, signal, onToken }) {
     if (!loaded) throw new Error('No model loaded');
     const callId = ++callSeq;
@@ -195,35 +227,129 @@ export function createInference({ engine, onDebug }) {
     }
   }
 
-  /**
-   * Run a completion and parse a single JSON value from the output. Retries once
-   * with a stricter "JSON only" nudge if the first parse fails.
-   *
-   * @param {{system?:string, user:string, schemaHint?:string, genConfig?:object, signal?:AbortSignal}} p
-   * @returns {Promise<any>}
-   */
-  async function completeJSON({ system, user, schemaHint, genConfig, signal }) {
-    const jsonSystem = [
-      system || '',
-      'You output ONLY valid JSON — no prose, no Markdown fences, no commentary.',
-      schemaHint ? `The JSON must match this shape: ${schemaHint}` : '',
-    ].filter(Boolean).join('\n');
+  const completeJSON = makeCompleteJSON(complete);
+  return { mode: 'local', setModelLoaded, isReady, complete, completeJSON };
+}
 
-    const first = await complete({ system: jsonSystem, user, genConfig, signal });
-    let parsed = parseJSONLoose(first);
-    if (parsed !== null) return parsed;
+/**
+ * Create the MANUAL (copy-paste) inference provider. The app shows the full
+ * prompt; the user pastes it into any external AI and pastes the answer back.
+ *
+ * @param {{ onPrompt:(p:{system?:string,user:string,rendered:string,signal?:AbortSignal})=>Promise<string>, onDebug?:Function }} opts
+ */
+export function createManualInference({ onPrompt, onDebug }) {
+  let callSeq = 0;
+  const emitDebug = makeDebugEmitter(onDebug);
 
-    // One retry: feed the bad output back and demand corrected JSON only.
-    const retryUser =
-      `Your previous answer was not valid JSON. Re-output the SAME content as a single ` +
-      `valid JSON value only.\n\nPrevious answer:\n${first}`;
-    const second = await complete({ system: jsonSystem, user: retryUser, genConfig, signal });
-    parsed = parseJSONLoose(second);
-    if (parsed !== null) return parsed;
-    throw new Error('Model did not return parseable JSON');
+  async function complete({ system, user, signal }) {
+    if (typeof onPrompt !== 'function') throw new Error('Copy-paste mode is not wired up');
+    const callId = ++callSeq;
+    const rendered = synthRendered({ system, user });
+    emitDebug({ callId, status: 'running', system, user, rendered });
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    const startedAt = Date.now();
+    try {
+      const answer = await onPrompt({ system, user, rendered, signal });
+      const cleaned = stripControlTokens(answer || '');
+      emitDebug({ callId, status: 'done', ms: Date.now() - startedAt, ok: true, system, user, rendered, raw: answer, output: cleaned });
+      return cleaned;
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        emitDebug({ callId, status: 'error', ms: Date.now() - startedAt, ok: false, system, user, rendered, error: e.message || String(e) });
+      }
+      throw e;
+    }
   }
 
-  return { setModelLoaded, isReady, complete, completeJSON };
+  const completeJSON = makeCompleteJSON(complete);
+  return { mode: 'manual', setModelLoaded() {}, isReady: () => typeof onPrompt === 'function', complete, completeJSON };
+}
+
+/**
+ * Create the MOCK (debug) inference provider. No AI is called — deterministic
+ * canned output lets the full workflow (Google Patents fetch, table + matrix
+ * UI, export) be exercised quickly.
+ *
+ * @param {{ onDebug?:Function }} [opts]
+ */
+export function createMockInference({ onDebug } = {}) {
+  let callSeq = 0;
+  const emitDebug = makeDebugEmitter(onDebug);
+
+  async function complete({ system, user, signal }) {
+    const callId = ++callSeq;
+    const rendered = synthRendered({ system, user });
+    emitDebug({ callId, status: 'running', system, user, rendered });
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const startedAt = Date.now();
+    const out = mockResponse({ system, user });
+    emitDebug({ callId, status: 'done', ms: Date.now() - startedAt, ok: true, system, user, rendered, raw: out, output: out, stats: { mock: true } });
+    return out;
+  }
+
+  const completeJSON = makeCompleteJSON(complete);
+  return { mode: 'mock', setModelLoaded() {}, isReady: () => true, complete, completeJSON };
+}
+
+/**
+ * Produce deterministic canned JSON for mock mode by sniffing the prompt's
+ * target shape (extraction vs mapping) from the appended schema hint.
+ */
+let mockVerdictTick = 0;
+function mockResponse({ system, user }) {
+  const probe = `${system || ''}\n${user || ''}`;
+  if (probe.includes('"features"')) {
+    // Extraction: emit two fake features per claim number found in the prompt.
+    const claimNums = [];
+    const re = /(?:^|\n)\s*(?:claim\s+)?(\d+)\s*[.)]/gi;
+    let m;
+    while ((m = re.exec(user || '')) !== null) {
+      const n = parseInt(m[1], 10);
+      if (!claimNums.includes(n)) claimNums.push(n);
+    }
+    if (claimNums.length === 0) claimNums.push(1);
+    const features = [];
+    for (const n of claimNums) {
+      features.push({ claim: n, feature: `[MOCK] primary element of claim ${n}`, evidence: `(mock evidence for claim ${n})`, type: 'component' });
+      features.push({ claim: n, feature: `[MOCK] secondary limitation of claim ${n}`, evidence: `(mock evidence for claim ${n})`, type: 'relationship' });
+    }
+    return JSON.stringify({ features });
+  }
+  if (probe.includes('"verdict"')) {
+    // Mapping: cycle Y / P / N deterministically; cite the first passage label.
+    const verdict = ['Y', 'P', 'N'][mockVerdictTick++ % 3];
+    const labelMatch = (user || '').match(/(\[[^\]]+\]|claim\s+\d+)\s*:/i);
+    const label = labelMatch ? labelMatch[1] : '[0001]';
+    const citations = verdict === 'N' ? [] : [{ label, quote: '(mock verbatim quote)' }];
+    return JSON.stringify({ verdict, citations, explanation: `[MOCK] deterministic ${verdict} verdict for workflow testing.` });
+  }
+  return '{}';
+}
+
+/**
+ * Route cognition calls to the active provider based on the current mode.
+ * The cognition modules depend only on this stable surface; switching mode at
+ * runtime needs no re-wiring.
+ *
+ * @param {{ local:object, manual:object, mock:object, getMode:()=>string }} opts
+ */
+export function createInferenceRouter({ local, manual, mock, getMode }) {
+  function active() {
+    const m = getMode ? getMode() : 'local';
+    if (m === 'manual') return manual;
+    if (m === 'mock') return mock;
+    return local;
+  }
+  return {
+    // Model load state only applies to the local provider.
+    setModelLoaded: (v) => local.setModelLoaded(v),
+    // Readiness is mode-aware: manual/mock need no loaded model.
+    isReady: () => active().isReady(),
+    getMode: () => (getMode ? getMode() : 'local'),
+    complete: (p) => active().complete(p),
+    completeJSON: (p) => active().completeJSON(p),
+  };
 }
 
 /**

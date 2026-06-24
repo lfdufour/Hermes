@@ -1,13 +1,29 @@
 /**
- * features/prompts.js — EPO-aligned prompt templates for feature extraction
- * and feature-to-document mapping.
+ * features/prompts.js — Prompt assembly for feature extraction and mapping.
+ *
+ * The EDITABLE parts (system instructions + user template) live in the settings
+ * store so they can be tuned at runtime without code changes. This module reads
+ * those parts, substitutes the live data into the user template's placeholders,
+ * and appends the FIXED output-structure block (the exact JSON shape the app
+ * parses) to the system prompt — so edits can never break parsing.
  *
  * Prompts are designed for small local models:
  *   - Demand strict JSON only (no prose, no fences).
  *   - Include a compact shape example so the model knows the target.
- *   - Keep inputs small (one claim at a time for extraction).
  *   - For mapping: present passages with labels, instruct verbatim quoting.
  */
+
+import { settings, STRUCTURE } from '../store/settings.js';
+
+/** Substitute {{TOKEN}} placeholders; tokens absent from the template are
+ *  ignored, and any provided value whose token is missing is dropped silently. */
+function fill(template, values) {
+  let out = String(template == null ? '' : template);
+  for (const [token, value] of Object.entries(values)) {
+    out = out.split(token).join(value == null ? '' : String(value));
+  }
+  return out;
+}
 
 /**
  * Build the system+user prompt for extracting a feature table from the FULL set
@@ -20,50 +36,19 @@
  * dependency detection deterministically. Processing all claims together lets
  * the model resolve cross-claim references ("the engine of claim 1").
  *
- * Based on a system prompt that empirically worked well on small local models.
- *
  * @param {{ claimsText: string }}
  * @returns {{ system: string, user: string }}
  */
 export function extractionPrompt({ claimsText }) {
-  const system = `You are a patent analysis engine.
+  const editableSystem = settings.getPrompt('extractionSystem');
+  const system = `${editableSystem}\n\n${STRUCTURE.extraction}`;
 
-Your task is to convert a set of patent CLAIMS into a structured FEATURE TABLE.
-
-You MUST follow these rules:
-1. Only use information explicitly stated in the claims.
-2. Do NOT infer, guess, or generalize beyond the text.
-3. Split each claim into its atomic technical features — one technical element, step, structure, parameter, or relationship per feature.
-4. Process ALL claims. For EVERY feature, record the number of the claim it comes from.
-5. "evidence" MUST be the exact verbatim phrase from the claim that supports the feature — copy it, do not paraphrase.
-6. Do not explain your reasoning.
-
-FEATURE DEFINITION:
-A feature is a concrete technical element, step, structure, parameter, or relationship.
-Examples:
-- physical component (e.g., "a sensor", "a valve", "a processor")
-- method step (e.g., "detecting a signal", "transmitting data")
-- parameter / constraint (e.g., "temperature above 50°C")
-- relationship (e.g., "A connected to B")
-
-IGNORE:
-- legal boilerplate
-- intended use
-- advantages or effects unless structural/technical
-
-OUTPUT FORMAT (STRICT):
-Return ONLY a JSON object in this exact structure:
-{"features":[{"claim":1,"feature":"a sensor detecting temperature","evidence":"a sensor configured to detect a temperature","type":"component"}]}
-
-"type" is one of: component, method, parameter, relationship.
-No extra text before or after the JSON.`;
-
-  const user = `Analyze the following claims according to the system instructions and return the feature table JSON only.
-
-CLAIMS:
-${claimsText}
-
-Return JSON only:`;
+  let user = fill(settings.getPrompt('extractionUser'), { '{{CLAIMS}}': claimsText });
+  // Safety net: if the user removed the {{CLAIMS}} placeholder, append the
+  // claims so the model still receives them.
+  if (!user.includes(claimsText)) {
+    user += `\n\nCLAIMS:\n${claimsText}`;
+  }
 
   return { system, user };
 }
@@ -82,40 +67,23 @@ export function mappingPrompt({ feature, dependencyContext, passages }) {
   // NOTE: We limit passage text to keep the prompt within token budgets
   // for small models. Each passage is presented with its label so the model
   // can cite it verbatim.
-  const passageBlock = passages.map(p =>
+  const passageBlock = (passages || []).map(p =>
     `${p.label}: ${p.text.slice(0, 600)}`
   ).join('\n\n');
 
   const depBlock = dependencyContext
-    ? `\nDependency context (features this feature builds upon from the independent claim):\n${dependencyContext}\n`
+    ? `Dependency context (features this feature builds upon from the independent claim):\n${dependencyContext}\n`
     : '';
 
-  const system = `You are an EPO patent examiner assessing novelty. For a given technical feature, determine whether it is "directly and unambiguously derivable" from the prior-art document passages provided.
+  const editableSystem = settings.getPrompt('mappingSystem');
+  const system = `${editableSystem}\n\n${STRUCTURE.mapping}`;
 
-Verdict rules:
-- Y = the feature is explicitly disclosed in the document passages.
-- P = the feature is partially, implicitly, or ambiguously disclosed (some aspects present but not all, or requires interpretation).
-- N = the feature is NOT disclosed. Do NOT invent or guess — if no passage matches, answer N.
-
-Citation rules:
-- For Y or P verdicts, you MUST provide at least one citation with the exact passage label and a verbatim quote copied from the passage text.
-- Use the EXACT label provided (e.g. "[0023]", "claim 3"). Do NOT invent labels.
-- The quote must be copied verbatim from the passage — do not paraphrase.
-- For N verdicts, citations should be an empty array.
-
-Output STRICT JSON ONLY. No prose, no markdown fences, no commentary.`;
-
-  const user = `Assess this feature against the prior-art passages below.
-
-Feature ${feature.id}: ${feature.text}
-${depBlock}
-Prior-art passages:
-${passageBlock}
-
-Return JSON with this exact shape:
-{"verdict":"Y","citations":[{"label":"[0023]","quote":"exact text from passage"}],"explanation":"Brief reasoned mapping."}
-
-Return JSON only:`;
+  const user = fill(settings.getPrompt('mappingUser'), {
+    '{{FEATURE_ID}}': feature.id,
+    '{{FEATURE}}': feature.text,
+    '{{DEPENDENCY}}': depBlock,
+    '{{PASSAGES}}': passageBlock,
+  });
 
   return { system, user };
 }
