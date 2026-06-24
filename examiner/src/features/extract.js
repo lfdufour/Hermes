@@ -81,9 +81,12 @@ export async function extractFeatureTable({ infer, claims, description, onProgre
       system: prompt.system,
       user: prompt.user,
       schemaHint: '{"features":[{"claim":int,"feature":str,"evidence":str,"type":str}]}',
-      // Generation stops early once a complete JSON value is produced (see
-      // completeJSON); this ceiling is only a safety bound.
-      genConfig: { max_new_tokens: 2048 },
+      // Each claim yields several features, each with a verbatim "evidence"
+      // string, so the output grows with claim count. Scale the ceiling so a
+      // large claim set isn't truncated mid-JSON. Generation early-stops once a
+      // complete JSON value is produced, so a high ceiling costs nothing when
+      // the output is short.
+      genConfig: { max_new_tokens: Math.min(8192, 1536 + units.length * 384) },
       signal,
       onToken,
     });

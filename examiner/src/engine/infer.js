@@ -35,16 +35,58 @@ export function parseJSONLoose(text) {
   const start = firstJsonStart(s);
   if (start < 0) return null;
   const candidate = sliceBalanced(s, start);
-  if (!candidate) return null;
-
-  // Try strict parse first, then a sequence of tolerant repairs.
-  const attempts = [candidate, repairJson(candidate)];
-  for (const attempt of attempts) {
-    try {
-      return JSON.parse(attempt);
-    } catch (_) {
-      /* try next */
+  if (candidate) {
+    // Try strict parse first, then a sequence of tolerant repairs.
+    for (const attempt of [candidate, repairJson(candidate)]) {
+      try {
+        return JSON.parse(attempt);
+      } catch (_) {
+        /* try next */
+      }
     }
+  }
+
+  // Last resort: the value never closed (e.g. generation hit the token cap
+  // mid-JSON). Salvage by cutting back to the last fully-completed element and
+  // closing the open brackets — so a truncated feature list still yields the
+  // features that did complete.
+  return salvageTruncatedJSON(s, start);
+}
+
+/**
+ * Best-effort recovery of a truncated JSON object/array: walk from `start`,
+ * find the last position where a nested element fully closed while still inside
+ * the outer container, cut there, drop any trailing comma, and append the
+ * brackets needed to close what remained open. Returns parsed value or null.
+ */
+function salvageTruncatedJSON(s, start) {
+  let inStr = false;
+  let esc = false;
+  const stack = [];
+  let cut = -1;
+  let cutStack = null;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{' || c === '[') stack.push(c === '{' ? '}' : ']');
+    else if (c === '}' || c === ']') {
+      stack.pop();
+      // Closing an inner element while still inside an outer container marks a
+      // safe truncation point (e.g. just after a complete feature object).
+      if (stack.length > 0) { cut = i + 1; cutStack = stack.slice(); }
+    }
+  }
+  if (cut < 0 || !cutStack) return null;
+  let out = s.slice(start, cut).replace(/[\s,]+$/, '');
+  for (let i = cutStack.length - 1; i >= 0; i--) out += cutStack[i];
+  for (const attempt of [out, repairJson(out)]) {
+    try { return JSON.parse(attempt); } catch (_) { /* try next */ }
   }
   return null;
 }
