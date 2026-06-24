@@ -157,11 +157,17 @@ export function createInference({ engine, onDebug }) {
     if (!loaded) throw new Error('No model loaded');
     const callId = ++callSeq;
     const messages = toMessages({ system, user });
+    // Log the INPUT immediately — BEFORE applyChatTemplate, which can itself be
+    // slow on first use (tokenizer warmup). This guarantees the inspector shows
+    // the system + user prompt the instant a call begins, even if templating or
+    // generation then hangs. The exact rendered prompt is filled in just below.
+    emitDebug({ callId, status: 'running', system, user });
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
     // `rendered` is the exact templated prompt string the model sees — the most
     // faithful "what was sent" for the debug inspector.
     const { input_ids, rendered } = await engine.applyChatTemplate({ messages, thinking: false });
-    // Log the INPUT immediately (status 'running') so the inspector shows what
-    // was sent while generation is still in flight; updated in place on return.
+    // Update the same entry in place now that the rendered prompt is available.
     emitDebug({ callId, status: 'running', system, user, rendered });
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 

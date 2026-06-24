@@ -125,9 +125,12 @@ export function renderStep1View(container, {
           claims,
           description,
           signal: abortController.signal,
-          onProgress: ({ claim, total }) => {
+          onProgress: ({ phase }) => {
             if (progressEl) {
-              progressEl.textContent = `Analyzing claim ${claim} of ${total}…`;
+              progressEl.textContent =
+                phase === 'assembling' ? 'Assembling feature table…'
+                : phase === 'done' ? 'Finalizing…'
+                : 'Analyzing all claims in one pass…';
             }
           },
         });

@@ -10,38 +10,58 @@
  */
 
 /**
- * Build the system+user prompt for extracting features from a single claim.
+ * Build the system+user prompt for extracting a feature table from the FULL set
+ * of claims in one pass.
  *
- * The model should decompose the claim into atomic technical features following
- * EPO methodology: two-part form detection (Rule 43(1) EPC), reference signs
- * (Rule 43(7)), claim category, and dependency detection.
+ * Deliberately simple — local models get confused by EPO formalities (two-part
+ * form, reference signs, categories), so we ask only for what's wanted: a flat
+ * list of atomic features, each tagged with the claim number it comes from and
+ * the verbatim claim phrase that supports it. The app handles N.M numbering and
+ * dependency detection deterministically. Processing all claims together lets
+ * the model resolve cross-claim references ("the engine of claim 1").
  *
- * @param {{ claimText: string, claimNumber: number, allClaimsContext?: string }}
+ * Based on a system prompt that empirically worked well on small local models.
+ *
+ * @param {{ claimsText: string }}
  * @returns {{ system: string, user: string }}
  */
-export function extractionPrompt({ claimText, claimNumber, allClaimsContext }) {
-  // NOTE: We include allClaimsContext (trimmed) so the model can resolve
-  // "according to claim X" references and understand dependent claim numbering,
-  // but extraction focuses on the single claim to keep prompts short.
-  const contextBlock = allClaimsContext
-    ? `\nAll claims (for reference only — analyze ONLY claim ${claimNumber}):\n${allClaimsContext.slice(0, 2000)}\n`
-    : '';
+export function extractionPrompt({ claimsText }) {
+  const system = `You are a patent analysis engine.
 
-  const system = `You are an EPO patent examiner assistant. You decompose patent claims into atomic technical features following EPO Guidelines for Examination.
+Your task is to convert a set of patent CLAIMS into a structured FEATURE TABLE.
 
-Rules:
-- Split the claim into atomic technical features (one technical limitation each).
-- Detect two-part form (Rule 43(1) EPC): if the claim contains "characterized in that", "characterized by", or "the improvement comprising", features before that phrase are "preamble" (known from prior art), features after are "characterizing" (the contribution). If no such phrase exists, set portion to null and twoPart to false.
-- Detect dependency: if the claim says "according to claim X", "of claim X", "as claimed in claim X", "claim X wherein", it is dependent. Extract the referenced claim numbers into dependsOn. Otherwise it is independent with dependsOn=[].
-- Extract reference signs (Rule 43(7)): parenthetical numerals like (12), (3a), (100) go into refSigns array. They are non-limiting — include them in refSigns but keep them in the feature text as-is.
-- Classify claim category: "product" for apparatus/device/system/composition claims, "process" for method/process/step claims, "use" for use claims. Null if unclear.
-- Output STRICT JSON ONLY. No prose, no markdown fences, no commentary.`;
+You MUST follow these rules:
+1. Only use information explicitly stated in the claims.
+2. Do NOT infer, guess, or generalize beyond the text.
+3. Split each claim into its atomic technical features — one technical element, step, structure, parameter, or relationship per feature.
+4. Process ALL claims. For EVERY feature, record the number of the claim it comes from.
+5. "evidence" MUST be the exact verbatim phrase from the claim that supports the feature — copy it, do not paraphrase.
+6. Do not explain your reasoning.
 
-  const user = `Analyze claim ${claimNumber} and return a JSON object with this exact shape:
-{"twoPart":false,"category":"product","type":"independent","dependsOn":[],"features":[{"text":"A widget (10) for processing data","portion":null,"refSigns":["10"]}]}
-${contextBlock}
-Claim ${claimNumber}:
-${claimText}
+FEATURE DEFINITION:
+A feature is a concrete technical element, step, structure, parameter, or relationship.
+Examples:
+- physical component (e.g., "a sensor", "a valve", "a processor")
+- method step (e.g., "detecting a signal", "transmitting data")
+- parameter / constraint (e.g., "temperature above 50°C")
+- relationship (e.g., "A connected to B")
+
+IGNORE:
+- legal boilerplate
+- intended use
+- advantages or effects unless structural/technical
+
+OUTPUT FORMAT (STRICT):
+Return ONLY a JSON object in this exact structure:
+{"features":[{"claim":1,"feature":"a sensor detecting temperature","evidence":"a sensor configured to detect a temperature","type":"component"}]}
+
+"type" is one of: component, method, parameter, relationship.
+No extra text before or after the JSON.`;
+
+  const user = `Analyze the following claims according to the system instructions and return the feature table JSON only.
+
+CLAIMS:
+${claimsText}
 
 Return JSON only:`;
 

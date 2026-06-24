@@ -1,8 +1,8 @@
 /**
  * ui/tableView.js — Editable feature-table grid.
  *
- * Columns: Feature ID, Claim, Type, Depends on, Portion (preamble/characterizing),
- * Ref signs, Feature text, Note.
+ * Columns: Feature ID (N.M), Claim, Type, Depends on, Feature text,
+ * Claim text (verbatim evidence), Note.
  * Supports inline editing, add/delete/reorder rows, re-numbering, and
  * "Freeze & continue to mapping".
  */
@@ -56,11 +56,7 @@ export function renderTableView(container, { table, frozen, onTableChanged, onFr
       <dl style="display:flex;flex-wrap:wrap;gap:4px 0;">
         <dt>Feature ID:</dt><dd>Claim.Feature (e.g. 1.3 = claim 1, feature 3)</dd>
         <dt>Type:</dt><dd>independent / dependent</dd>
-        <dt>Portion:</dt><dd>
-          <span class="portion-badge portion-preamble">preamble</span> = known prior art (Rule 43(1) EPC);
-          <span class="portion-badge portion-characterizing">characterizing</span> = asserted contribution
-        </dd>
-        <dt>Ref signs:</dt><dd>Reference numerals from drawings (Rule 43(7)), non-limiting</dd>
+        <dt>Claim text:</dt><dd>verbatim phrase from the claim that supports the feature</dd>
       </dl>
     `;
     container.appendChild(legend);
@@ -80,9 +76,8 @@ export function renderTableView(container, { table, frozen, onTableChanged, onFr
       <th>Claim</th>
       <th>Type</th>
       <th>Depends on</th>
-      <th>Portion</th>
-      <th>Ref Signs</th>
-      <th style="min-width:250px">Feature Text</th>
+      <th style="min-width:230px">Feature</th>
+      <th style="min-width:230px">Claim Text (verbatim)</th>
       <th>Note</th>
       ${!isFrozen ? '<th style="width:80px">Actions</th>' : ''}
     </tr>`;
@@ -95,24 +90,15 @@ export function renderTableView(container, { table, frozen, onTableChanged, onFr
       tr.setAttribute('data-idx', String(idx));
 
       const editable = isFrozen ? '' : 'contenteditable="true"';
-      const portionHtml = renderPortion(f.portion);
       const dependsStr = Array.isArray(f.dependsOn) ? f.dependsOn.join(', ') : '';
-      const refStr = Array.isArray(f.refSigns) ? f.refSigns.join(', ') : '';
 
       tr.innerHTML = `
         <td class="ft-id" ${editable}>${escapeHtml(f.id || '')}</td>
         <td class="ft-claim" ${editable}>${f.claim != null ? f.claim : ''}</td>
         <td class="ft-type" ${editable}>${escapeHtml(f.type || '')}</td>
         <td class="ft-depends" ${editable}>${escapeHtml(dependsStr)}</td>
-        <td class="ft-portion">${isFrozen ? portionHtml :
-          `<select class="ft-portion-select" style="font-size:0.78rem;padding:2px 4px;">
-            <option value="" ${!f.portion ? 'selected' : ''}>--</option>
-            <option value="preamble" ${f.portion === 'preamble' ? 'selected' : ''}>preamble</option>
-            <option value="characterizing" ${f.portion === 'characterizing' ? 'selected' : ''}>characterizing</option>
-          </select>`}
-        </td>
-        <td class="ft-refs" ${editable}>${escapeHtml(refStr)}</td>
         <td class="ft-text" ${editable}>${escapeHtml(f.text || '')}</td>
+        <td class="ft-evidence" ${editable} style="color:var(--text-muted);font-style:italic;">${escapeHtml(f.evidence || '')}</td>
         <td class="ft-note" ${editable}>${escapeHtml(f.note || '')}</td>
         ${!isFrozen ? `<td>
           <button class="btn-icon tv-move-up" title="Move up" ${idx === 0 ? 'disabled' : ''}>&#x25B2;</button>
@@ -139,13 +125,6 @@ export function renderTableView(container, { table, frozen, onTableChanged, onFr
     // Contenteditable blur → commit changes
     tbody.querySelectorAll('td[contenteditable="true"]').forEach(td => {
       td.addEventListener('blur', () => {
-        commitEditsFromDOM(tbody);
-      });
-    });
-
-    // Portion selects
-    tbody.querySelectorAll('.ft-portion-select').forEach(sel => {
-      sel.addEventListener('change', () => {
         commitEditsFromDOM(tbody);
       });
     });
@@ -197,9 +176,8 @@ export function renderTableView(container, { table, frozen, onTableChanged, onFr
       const claim = tr.querySelector('.ft-claim');
       const type = tr.querySelector('.ft-type');
       const depends = tr.querySelector('.ft-depends');
-      const portionSel = tr.querySelector('.ft-portion-select');
-      const refs = tr.querySelector('.ft-refs');
       const text = tr.querySelector('.ft-text');
+      const evidence = tr.querySelector('.ft-evidence');
       const note = tr.querySelector('.ft-note');
 
       if (id) f.id = id.textContent.trim();
@@ -209,14 +187,8 @@ export function renderTableView(container, { table, frozen, onTableChanged, onFr
         const raw = depends.textContent.trim();
         f.dependsOn = raw ? raw.split(/[,;\s]+/).map(Number).filter(n => !isNaN(n)) : [];
       }
-      if (portionSel) {
-        f.portion = portionSel.value || null;
-      }
-      if (refs) {
-        const raw = refs.textContent.trim();
-        f.refSigns = raw ? raw.split(/[,;\s]+/).filter(Boolean) : [];
-      }
       if (text) f.text = text.textContent.trim();
+      if (evidence) f.evidence = evidence.textContent.trim();
       if (note) f.note = note.textContent.trim();
     });
     notifyChanged();
@@ -239,6 +211,7 @@ export function renderTableView(container, { table, frozen, onTableChanged, onFr
       type: 'independent',
       dependsOn: [],
       text: '',
+      evidence: '',
       portion: null,
       refSigns: [],
       category: null,
@@ -287,14 +260,6 @@ export function renderTableView(container, { table, frozen, onTableChanged, onFr
 
   // Initial render
   render();
-}
-
-/** Render a portion badge. */
-function renderPortion(portion) {
-  if (!portion) return '<span style="color:var(--text-faint)">--</span>';
-  if (portion === 'preamble') return '<span class="portion-badge portion-preamble">preamble</span>';
-  if (portion === 'characterizing') return '<span class="portion-badge portion-characterizing">characterizing</span>';
-  return escapeHtml(portion);
 }
 
 /** Escape HTML entities. */

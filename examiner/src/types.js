@@ -12,7 +12,8 @@
  * @property {number} claim              owning claim number
  * @property {'independent'|'dependent'} type
  * @property {number[]} dependsOn        claim numbers the owning claim depends on
- * @property {string} text               verbatim atomic technical feature (one limitation)
+ * @property {string} text               atomic technical feature (one limitation)
+ * @property {string} [evidence]         verbatim claim phrase supporting this feature
  * @property {'preamble'|'characterizing'|null} portion  two-part form (Rule 43(1) EPC)
  * @property {string[]} refSigns         reference numerals (Rule 43(7)); non-limiting
  * @property {ClaimCategory} category
