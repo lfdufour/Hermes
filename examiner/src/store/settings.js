@@ -34,6 +34,11 @@ Return ONLY a JSON object in this exact structure:
 {"verdict":"Y","citations":[{"label":"[0023]","quote":"exact text from passage"}],"explanation":"Brief reasoned mapping."}
 "verdict" is one of: Y, P, N.
 No extra text before or after the JSON.`,
+  mappingBatch: `OUTPUT FORMAT (STRICT):
+Return ONLY a JSON object in this exact structure, with ONE entry per feature you were given:
+{"results":[{"featureId":"1.1","verdict":"Y","citations":[{"label":"[0023]","quote":"exact text from passage"}],"explanation":"Brief reasoned mapping."}]}
+"verdict" is one of: Y, P, N. Include EVERY feature id, in the same order.
+No extra text before or after the JSON.`,
 };
 
 /** Placeholders the user can use in the editable user templates. */
@@ -112,6 +117,15 @@ const DEFAULT_MODE = 'local';
 export const MAPPING_CONTEXTS = ['retrieval', 'full'];
 const DEFAULT_MAPPING_CONTEXT = 'retrieval';
 
+/** How many features are assessed per model call in Step 2:
+ *   'feature' — one feature per call (most reliable; slowest).
+ *   'claim'   — all features of a claim in one call (claims are self-consistent;
+ *               good speed/reliability balance — the default).
+ *   'all'     — the entire feature table in a single call (fastest; needs a
+ *               capable, large-context model or it may drop/garble features). */
+export const MAPPING_BATCHES = ['feature', 'claim', 'all'];
+const DEFAULT_MAPPING_BATCH = 'claim';
+
 /** In-memory state, hydrated from localStorage on first access. */
 let state = null;
 const subs = new Set();
@@ -140,6 +154,7 @@ function ensure() {
   state = {
     mode: MODES.includes(stored.mode) ? stored.mode : DEFAULT_MODE,
     mappingContext: MAPPING_CONTEXTS.includes(stored.mappingContext) ? stored.mappingContext : DEFAULT_MAPPING_CONTEXT,
+    mappingBatch: MAPPING_BATCHES.includes(stored.mappingBatch) ? stored.mappingBatch : DEFAULT_MAPPING_BATCH,
     prompts: { ...DEFAULT_PROMPTS, ...(stored.prompts || {}) },
   };
   return state;
@@ -165,6 +180,15 @@ export const settings = {
   setMappingContext(ctx) {
     if (!MAPPING_CONTEXTS.includes(ctx)) return;
     ensure().mappingContext = ctx;
+    writeStorage();
+    emit();
+  },
+
+  // --- mapping batch (how many features per model call in Step 2) ---
+  getMappingBatch() { return ensure().mappingBatch; },
+  setMappingBatch(b) {
+    if (!MAPPING_BATCHES.includes(b)) return;
+    ensure().mappingBatch = b;
     writeStorage();
     emit();
   },

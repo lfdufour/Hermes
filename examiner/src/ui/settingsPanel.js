@@ -7,11 +7,17 @@
  * relies on for parsing.
  */
 
-import { STRUCTURE, PLACEHOLDERS, MODES, MAPPING_CONTEXTS } from '../store/settings.js';
+import { STRUCTURE, PLACEHOLDERS, MODES, MAPPING_CONTEXTS, MAPPING_BATCHES } from '../store/settings.js';
 
 const MAPPING_CONTEXT_INFO = {
   retrieval: { label: 'Most relevant passages', desc: 'Send only the passages most similar to each feature (fast; small context).' },
   full: { label: 'Entire description', desc: 'Send the whole document so paraphrased disclosure is not missed by keyword matching. Needs a large-context model (Gemma 4, Qwen) and is slower.' },
+};
+
+const MAPPING_BATCH_INFO = {
+  feature: { label: 'One feature per call', desc: 'Most reliable, slowest — a separate model call for every feature.' },
+  claim: { label: 'One claim per call', desc: 'Assess all features of a claim together. Claims are self-consistent — good speed/reliability balance.' },
+  all: { label: 'Whole table per call', desc: 'Assess every feature in a single call. Fastest, but needs a capable large-context model or it may drop features.' },
 };
 
 const MODE_INFO = {
@@ -131,6 +137,18 @@ export function createSettingsPanel({ settings, onModeChange }) {
           </label>`).join('')}
       </div>
 
+      <div class="set-section-title">Feature mapping speed (Step 2)</div>
+      <div class="set-modes" id="set-mapbatch">
+        ${MAPPING_BATCHES.map(b => `
+          <label class="set-mode" data-mapbatch="${b}">
+            <input type="radio" name="set-mapbatch" value="${b}">
+            <span>
+              <span class="mlabel">${esc(MAPPING_BATCH_INFO[b].label)}</span>
+              <span class="mdesc">${esc(MAPPING_BATCH_INFO[b].desc)}</span>
+            </span>
+          </label>`).join('')}
+      </div>
+
       <div class="set-section-title">Prompts</div>
       <p class="set-hint" style="margin-bottom:10px;">
         Edit the instruction text freely. The fixed JSON output structure (shown locked under each
@@ -145,6 +163,7 @@ export function createSettingsPanel({ settings, onModeChange }) {
   const closeBtn = drawer.querySelector('#set-close');
   const modesEl = drawer.querySelector('#set-modes');
   const mapCtxEl = drawer.querySelector('#set-mapctx');
+  const mapBatchEl = drawer.querySelector('#set-mapbatch');
   const fieldsEl = drawer.querySelector('#set-fields');
   const resetAllBtn = drawer.querySelector('#set-reset-all');
 
@@ -191,6 +210,22 @@ export function createSettingsPanel({ settings, onModeChange }) {
     });
   });
 
+  // --- Mapping-batch radios ---
+  function syncMapBatchUI() {
+    const b = settings.getMappingBatch();
+    mapBatchEl.querySelectorAll('.set-mode').forEach(el => {
+      const v = el.getAttribute('data-mapbatch');
+      el.classList.toggle('active', v === b);
+      const input = el.querySelector('input');
+      if (input) input.checked = v === b;
+    });
+  }
+  mapBatchEl.querySelectorAll('input[name="set-mapbatch"]').forEach(input => {
+    input.addEventListener('change', () => {
+      if (input.checked) { settings.setMappingBatch(input.value); syncMapBatchUI(); }
+    });
+  });
+
   // --- Prompt fields ---
   for (const field of PROMPT_FIELDS) {
     const wrap = document.createElement('div');
@@ -234,9 +269,10 @@ export function createSettingsPanel({ settings, onModeChange }) {
   }
 
   // Keep selectors in sync if changed elsewhere (e.g. the model bar).
-  settings.subscribe(() => { syncModeUI(); syncMapCtxUI(); });
+  settings.subscribe(() => { syncModeUI(); syncMapCtxUI(); syncMapBatchUI(); });
   syncModeUI();
   syncMapCtxUI();
+  syncMapBatchUI();
 
   return { toggleButton };
 }

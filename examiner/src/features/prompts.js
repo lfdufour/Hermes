@@ -94,3 +94,49 @@ export function mappingPrompt({ feature, dependencyContext, passages, perPassage
 
   return { system, user };
 }
+
+/**
+ * Build a BATCH mapping prompt: assess several features against one document in
+ * a single call. Reuses the editable mapping system instructions but with the
+ * array output structure; the user prompt is assembled programmatically (the
+ * single-feature {{...}} template doesn't apply to a list).
+ *
+ * @param {{ features: import('../types.js').Feature[], dependencyContext?: string,
+ *           passages: import('../types.js').Passage[], perPassageChars?: number, totalChars?: number }}
+ * @returns {{ system: string, user: string }}
+ */
+export function mappingPromptBatch({ features, dependencyContext, passages, perPassageChars = 600, totalChars = Infinity }) {
+  let used = 0;
+  const lines = [];
+  for (const p of (passages || [])) {
+    const text = p.text.length > perPassageChars ? p.text.slice(0, perPassageChars) : p.text;
+    const line = `${p.label}: ${text}`;
+    if (used + line.length > totalChars) break;
+    used += line.length;
+    lines.push(line);
+  }
+  const passageBlock = lines.join('\n\n');
+
+  const featureList = (features || [])
+    .map(f => `- ${f.id}: ${f.text}`)
+    .join('\n');
+
+  const depBlock = dependencyContext
+    ? `Context — features already established in the independent claim(s) these build upon:\n${dependencyContext}\n\n`
+    : '';
+
+  const editableSystem = settings.getPrompt('mappingSystem');
+  const system = `${editableSystem}\n\n${STRUCTURE.mappingBatch}`;
+
+  const user = `Assess EACH of the following features against the prior-art passages below. Give a separate verdict for every feature.
+
+${depBlock}Features to assess:
+${featureList}
+
+Prior-art passages:
+${passageBlock}
+
+Return JSON only:`;
+
+  return { system, user };
+}

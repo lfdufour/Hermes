@@ -14,9 +14,50 @@
 // dependency on ../patent/retrieve.js at module load time. That module is
 // built by a sibling agent and may not exist yet during testing. The
 // summarize() export (pure logic) must remain importable without it.
-import { mappingPrompt } from '../features/prompts.js';
+import { mappingPrompt, mappingPromptBatch } from '../features/prompts.js';
 import { dependencyContext } from '../features/table.js';
 import { settings } from '../store/settings.js';
+
+/**
+ * Choose how much of a document to show the model for a given set of features.
+ *  - 'full': the ENTIRE document (all passages) so paraphrased/synonymous
+ *    disclosure isn't missed by keyword matching. Needs a large-context model.
+ *  - 'retrieval' (default): the lexically most-similar passages. When several
+ *    features share a call (batching) we send the UNION of each feature's top
+ *    passages so every feature has its relevant context.
+ *
+ * @param {import('../types.js').Feature[]} features
+ * @param {import('../types.js').PriorArtDoc} doc
+ */
+async function selectContext(features, doc) {
+  const allPassages = doc.passages || [];
+  if (settings.getMappingContext() === 'full') {
+    return { passages: allPassages, perPassageChars: 4000, totalChars: 120000 };
+  }
+  // Dynamic import to avoid a hard dependency at module load time.
+  const { topPassages } = await import('../patent/retrieve.js');
+  const perFeatureK = features.length > 1 ? 4 : 6; // fewer each when batching
+  const seen = new Set();
+  const union = [];
+  for (const f of features) {
+    for (const p of topPassages(f.text, allPassages, { k: perFeatureK })) {
+      if (!seen.has(p.index)) { seen.add(p.index); union.push(p); }
+    }
+  }
+  union.sort((a, b) => a.index - b.index);
+  return { passages: union, perPassageChars: 600, totalChars: Infinity };
+}
+
+/** Combined dependency context for a group: union of the inherited-feature
+ *  lines across the group, so the model sees what dependent features build on. */
+function groupDependencyContext(features, table) {
+  const lines = new Set();
+  for (const f of features) {
+    const c = dependencyContext(f, table);
+    if (c) for (const line of c.split('\n')) { if (line.trim()) lines.add(line); }
+  }
+  return [...lines].join('\n');
+}
 
 /**
  * Map a single feature against a prior-art document.
@@ -32,30 +73,9 @@ import { settings } from '../store/settings.js';
  */
 export async function mapFeature({ infer, feature, table, doc, signal }) {
   try {
-    // Choose how much of the document to show the model.
-    //  - 'full': the ENTIRE document (all passages, untruncated up to a large
-    //    budget) so paraphrased/synonymous disclosure isn't missed by keyword
-    //    matching. Needs a large-context model (e.g. Gemma 4 256K, Qwen 32K).
-    //  - 'retrieval' (default): only the lexically most-similar passages — fast
-    //    and small-context-friendly.
-    const allPassages = doc.passages || [];
-    let passages, perPassageChars, totalChars;
-    if (settings.getMappingContext() === 'full') {
-      passages = allPassages;
-      perPassageChars = 4000;   // keep individual passages whole in practice
-      totalChars = 120000;      // ~30K tokens; well within large context windows
-    } else {
-      // Dynamic import to avoid a hard dependency at module load time.
-      const { topPassages } = await import('../patent/retrieve.js');
-      passages = topPassages(feature.text, allPassages, { k: 6 });
-      perPassageChars = 600;
-      totalChars = Infinity;
-    }
-
-    // Build dependency context for dependent features
+    const { passages, perPassageChars, totalChars } = await selectContext([feature], doc);
     const depCtx = dependencyContext(feature, table);
 
-    // Build and send the mapping prompt
     const prompt = mappingPrompt({
       feature,
       dependencyContext: depCtx,
@@ -71,26 +91,100 @@ export async function mapFeature({ infer, feature, table, doc, signal }) {
       signal,
     });
 
-    // Normalize the model output
     return normalizeCellResult(feature.id, result);
   } catch (err) {
     // NOTE: We never throw from mapFeature. If the model fails, signal
     // is aborted, or any other error occurs, we return an error CellResult
     // so the mapping matrix remains displayable.
-    return {
-      featureId: feature.id,
-      verdict: 'N',
-      citations: [],
-      explanation: '',
-      status: 'error',
-      error: err.message || 'Unknown mapping error',
-    };
+    return errorCell(feature.id, err.message || 'Unknown mapping error');
   }
 }
 
 /**
+ * Map a GROUP of features against one document in a single model call.
+ * Returns one CellResult per input feature (a feature missing from the model's
+ * response becomes an error cell). Never throws.
+ *
+ * @param {{
+ *   infer: { completeJSON: Function },
+ *   features: import('../types.js').Feature[],
+ *   table: import('../types.js').FeatureTable,
+ *   doc: import('../types.js').PriorArtDoc,
+ *   signal?: AbortSignal
+ * }} opts
+ * @returns {Promise<import('../types.js').CellResult[]>}
+ */
+export async function mapFeatureGroup({ infer, features, table, doc, signal }) {
+  try {
+    const { passages, perPassageChars, totalChars } = await selectContext(features, doc);
+    const depCtx = groupDependencyContext(features, table);
+
+    const prompt = mappingPromptBatch({
+      features,
+      dependencyContext: depCtx,
+      passages,
+      perPassageChars,
+      totalChars,
+    });
+
+    const result = await infer.completeJSON({
+      system: prompt.system,
+      user: prompt.user,
+      schemaHint: '{"results":[{"featureId":str,"verdict":"Y"|"N"|"P","citations":[{"label":str,"quote":str}],"explanation":str}]}',
+      // Room for one result object per feature; early-stops once JSON is complete.
+      genConfig: { max_new_tokens: Math.min(4096, 512 + features.length * 220) },
+      signal,
+    });
+
+    // Index results by featureId (accept a bare array too, for lenient models).
+    const arr = result && Array.isArray(result.results) ? result.results
+      : (Array.isArray(result) ? result : []);
+    const byId = new Map();
+    for (const r of arr) {
+      if (r && r.featureId != null) byId.set(String(r.featureId).trim(), r);
+    }
+
+    return features.map(f => {
+      const raw = byId.get(f.id);
+      if (!raw) return errorCell(f.id, 'No verdict returned for this feature in the batch response.');
+      return normalizeCellResult(f.id, raw);
+    });
+  } catch (err) {
+    // Never throw — surface the failure as error cells so the matrix still renders.
+    return features.map(f => errorCell(f.id, err.message || 'Batch mapping error'));
+  }
+}
+
+/** Build an error CellResult. */
+function errorCell(featureId, error) {
+  return { featureId, verdict: 'N', citations: [], explanation: '', status: 'error', error };
+}
+
+/**
+ * Partition features into model-call groups per the mapping-batch setting.
+ * @param {import('../types.js').Feature[]} features
+ * @param {'feature'|'claim'|'all'} batch
+ * @returns {import('../types.js').Feature[][]}
+ */
+function groupFeatures(features, batch) {
+  const list = Array.isArray(features) ? features : [];
+  if (batch === 'all') return list.length ? [list.slice()] : [];
+  if (batch === 'claim') {
+    const byClaim = new Map();
+    for (const f of list) {
+      const key = f.claim != null ? f.claim : 0;
+      if (!byClaim.has(key)) byClaim.set(key, []);
+      byClaim.get(key).push(f);
+    }
+    return [...byClaim.values()];
+  }
+  return list.map(f => [f]); // 'feature'
+}
+
+/**
  * Map all features in the table against a single prior-art document.
- * Emits onCell(cellResult) progressively as each feature completes.
+ * Features are grouped per the mapping-batch setting (feature / claim / all) so
+ * fewer model calls are made. Emits onCell(cellResult) progressively.
  *
  * @param {{
  *   infer: { completeJSON: Function },
@@ -104,26 +198,26 @@ export async function mapFeature({ infer, feature, table, doc, signal }) {
 export async function mapDocument({ infer, table, doc, onCell, signal }) {
   /** @type {import('../types.js').CellResult[]} */
   const cells = [];
+  const batch = settings.getMappingBatch();
+  const groups = groupFeatures(table.features || [], batch);
 
-  for (const feature of table.features) {
+  for (const group of groups) {
     if (signal?.aborted) {
-      // Fill remaining features as errors
-      cells.push({
-        featureId: feature.id,
-        verdict: 'N',
-        citations: [],
-        explanation: '',
-        status: 'error',
-        error: 'Aborted',
-      });
+      for (const f of group) {
+        const cell = errorCell(f.id, 'Aborted');
+        cells.push(cell);
+        if (onCell) onCell(cell);
+      }
       continue;
     }
 
-    const cell = await mapFeature({ infer, feature, table, doc, signal });
-    cells.push(cell);
+    const groupCells = batch === 'feature'
+      ? [await mapFeature({ infer, feature: group[0], table, doc, signal })]
+      : await mapFeatureGroup({ infer, features: group, table, doc, signal });
 
-    if (onCell) {
-      onCell(cell);
+    for (const cell of groupCells) {
+      cells.push(cell);
+      if (onCell) onCell(cell);
     }
   }
 

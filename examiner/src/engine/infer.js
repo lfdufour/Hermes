@@ -348,11 +348,24 @@ function mockResponse({ system, user }) {
     }
     return JSON.stringify({ features });
   }
+  const labelMatch = (user || '').match(/(\[[^\]]+\]|claim\s+\d+)\s*:/i);
+  const label = labelMatch ? labelMatch[1] : '[0001]';
+  if (probe.includes('"results"')) {
+    // Batch mapping: one result per feature id listed as "- N.M: ..." in the user prompt.
+    const ids = [];
+    const re = /(?:^|\n)\s*-\s*(\d+\.\d+)\s*:/g;
+    let m;
+    while ((m = re.exec(user || '')) !== null) ids.push(m[1]);
+    if (ids.length === 0) ids.push('1.1');
+    const results = ids.map((id, i) => {
+      const verdict = ['Y', 'P', 'N'][i % 3];
+      return { featureId: id, verdict, citations: verdict === 'N' ? [] : [{ label, quote: '(mock verbatim quote)' }], explanation: `[MOCK] deterministic ${verdict} verdict.` };
+    });
+    return JSON.stringify({ results });
+  }
   if (probe.includes('"verdict"')) {
-    // Mapping: cycle Y / P / N deterministically; cite the first passage label.
+    // Single-feature mapping: cycle Y / P / N deterministically.
     const verdict = ['Y', 'P', 'N'][mockVerdictTick++ % 3];
-    const labelMatch = (user || '').match(/(\[[^\]]+\]|claim\s+\d+)\s*:/i);
-    const label = labelMatch ? labelMatch[1] : '[0001]';
     const citations = verdict === 'N' ? [] : [{ label, quote: '(mock verbatim quote)' }];
     return JSON.stringify({ verdict, citations, explanation: `[MOCK] deterministic ${verdict} verdict for workflow testing.` });
   }
